@@ -1,4 +1,4 @@
-// /core/handler.js (VERSI FINAL DENGAN WAIT STATE)
+// /core/handler.js (VERSI FINAL DENGAN WAIT STATE & FORMATBYTES)
 
 import { getOrCreateUserBasicData } from './firebase.js';
 import { getUserLocalData, updateAffection, deductUserEnergy } from './localDataHandler.js';
@@ -12,6 +12,21 @@ import { downloadContentFromMessage } from '@fizzxydev/baileys-pro';
 const conversationHistory = new Map();
 const MAX_HISTORY_LENGTH = 8;
 
+/**
+ * Mengubah byte menjadi format yang mudah dibaca (KB, MB, GB).
+ * @param {number} bytes - Jumlah byte.
+ * @param {number} decimals - Jumlah angka desimal.
+ * @returns {string} Ukuran file yang diformat.
+ */
+export function formatBytes(bytes, decimals = 2) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const dm = decimals < 0 ? 0 : decimals;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+}
+
 export async function handler(sock, m) {
     if (!m || !m.messages || m.messages.length === 0) return;
     const msg = m.messages[0];
@@ -21,10 +36,10 @@ export async function handler(sock, m) {
     const pushName = msg.pushName || "Tuan";
     const messageContent = msg.message;
     // Ekstrak isi pesan dari berbagai kemungkinan tipe balasan
-    const body = messageContent.conversation 
-                 || messageContent.extendedTextMessage?.text 
-                 || messageContent.buttonsResponseMessage?.selectedButtonId 
-                 || messageContent.listResponseMessage?.singleSelectReply?.selectedRowId 
+    const body = messageContent.conversation
+                 || messageContent.extendedTextMessage?.text
+                 || messageContent.buttonsResponseMessage?.selectedButtonId
+                 || messageContent.listResponseMessage?.singleSelectReply?.selectedRowId
                  || '';
     const hasMedia = messageContent.imageMessage || messageContent.videoMessage;
 
@@ -62,14 +77,14 @@ export async function handler(sock, m) {
         if (hasMedia) {
             // Logika untuk mengunggah media jika ada
         }
-        
+
         const fullUserPrompt = mediaUrl ? `${body} [Info Media: ${mediaUrl}]` : body;
         if (!fullUserPrompt) return;
 
         userHistory.push({ role: 'user', parts: [{ text: fullUserPrompt }] });
 
         const decision = await callGeminiForAction(userHistory, pushName, userData.affection);
-        
+
         console.log(`[HANDLER_DEBUG] Keputusan mentah dari Gemini untuk ${sender}:`, JSON.stringify(decision, null, 2));
 
         if (!decision || typeof decision.action !== 'string') {
@@ -103,7 +118,7 @@ export async function handler(sock, m) {
                     await sock.sendMessage(sender, { text: botResponseText }, { quoted: msg });
                     break;
                 }
-                
+
                 const parameters = decision.parameters || {};
                 if (mediaUrl) parameters.media_url = mediaUrl;
 
@@ -112,11 +127,11 @@ export async function handler(sock, m) {
 
                 botResponseText = `Siap laksanakan, Tuan ${pushName}! Aira mulai kerjain perintah *${commandName}* ya. Tunggu sebentar! 😉`;
                 await sock.sendMessage(sender, { text: botResponseText }, { quoted: msg });
-                
+
                 executeCommand(commandName, sock, msg, args, text, sender, {});
 
                 updateAffection(internalId, 5, 'Happy');
-                conversationHistory.delete(sender); 
+                conversationHistory.delete(sender);
                 return;
 
             case 'error':

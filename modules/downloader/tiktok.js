@@ -2,7 +2,6 @@
 
 import { BOT_PREFIX, WATERMARK } from '../../config.js';
 import { safeApiGet } from '../../libs/apiHelper.js';
-import { CANCEL_BUTTON_ID } from '../../core/waitStateHandler.js';
 import axios from 'axios';
 
 export const category = 'downloaders';
@@ -13,7 +12,7 @@ export const energyCost = 5;
 
 // Helper untuk download dengan penyamaran lengkap
 async function downloadWithStealth(url) {
-     const response = await axios.get(url, { 
+     const response = await axios.get(url, {
         responseType: 'arraybuffer',
         headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -32,7 +31,7 @@ async function downloadWithStealth(url) {
 async function handleQualitySelection(sock, msg, body, waitState) {
     const sender = msg.key.remoteJid;
     const { hd, sd, mp3, caption } = waitState.dataTambahan;
-    
+
     let url, quality, handler;
 
     switch (body) {
@@ -53,10 +52,10 @@ async function handleQualitySelection(sock, msg, body, waitState) {
     }
 
     const statusMsg = await sock.sendMessage(sender, { text: `✅ Oke, download file *${quality}*. Sabar ya, proses ini kadang lama...` }, { quoted: msg });
-    
+
     try {
         if (!url) throw new Error(`Link buat kualitas ${quality} nggak ada.`);
-        
+
         const fileBuffer = await downloadWithStealth(url);
         await sock.sendMessage(sender, { text: `🚀 Udah dapet! Ngirim file...`, edit: statusMsg.key });
         await handler(fileBuffer);
@@ -71,10 +70,10 @@ async function handleQualitySelection(sock, msg, body, waitState) {
 async function handleVideoType(sock, msg, result, extras) {
     const { set: setWaitingState } = extras;
     const sender = msg.key.remoteJid;
-     
+
     const { no_watermark_hd, no_watermark, mp3 } = result.media[0].links;
     const caption = `*${result.description?.trim() || 'Video TikTok'}*\nOleh: @${result.author.unique_id || 'Unknown'}\n\n${WATERMARK}`;
-    
+
     const buttons = [];
     if (no_watermark_hd) buttons.push({ buttonId: 'tt_dl_hd', buttonText: { displayText: 'Video HD' }, type: 1 });
     if (no_watermark) buttons.push({ buttonId: 'tt_dl_sd', buttonText: { displayText: 'Video SD' }, type: 1 });
@@ -89,7 +88,7 @@ async function handleVideoType(sock, msg, result, extras) {
         buttons: buttons,
         headerType: 4
     };
-    
+
     const sentMsg = await sock.sendMessage(sender, buttonMessage, { quoted: msg });
     await setWaitingState(sender, 'tiktok_quality', handleQualitySelection, {
         dataTambahan: { hd: no_watermark_hd, sd: no_watermark, mp3, caption },
@@ -102,7 +101,7 @@ async function handleCarouselType(sock, msg, result) {
     const sender = msg.key.remoteJid;
     const images = result.media;
     if (!images || images.length === 0) throw new Error("API bilang ini carousel, tapi isinya kosong.");
-    
+
     const statusMsg = await sock.sendMessage(sender, { text: `✅ Ditemukan *${images.length}* gambar. Lagi download semua, sabar ya...`}, { quoted: msg });
 
     const mainCaption = `*Oleh: ${result.author.nickname?.trim() || 'Unknown'}*\n\n${result.description?.trim() || 'Slideshow TikTok'}\n\n${WATERMARK}`;
@@ -117,12 +116,12 @@ async function handleCarouselType(sock, msg, result) {
             console.warn(`Gagal download salah satu gambar carousel: ${e.message}`);
         }
     }
-    
+
     if (albumItems.length === 0){
         await sock.sendMessage(sender, { text: `❌ Gagal download semua gambar dari slideshow ini.`, edit: statusMsg.key });
         return;
     }
-    
+
     await sock.sendMessage(sender, { text: `🚀 Mengirim album...`, edit: statusMsg.key });
     await sock.sendAlbumMessage(sender, albumItems, { quoted: msg });
     await sock.sendMessage(sender, { delete: statusMsg.key });
@@ -134,7 +133,7 @@ async function startTikTokDownload(sock, msg, userUrl, extras) {
     try {
         const result = await safeApiGet(`https://szyrineapi.biz.id/api/downloaders/tiktok?url=${encodeURIComponent(userUrl)}`);
         if (!result || !result.type) throw new Error('Respons API tidak valid atau tipenya aneh.');
-        
+
         await sock.sendMessage(sender, { delete: statusMsg.key });
 
         if (result.type === 'video') {
