@@ -21,15 +21,12 @@ async function sendMedia(sock, msg, mediaList, fullCaption) {
 
     if (mediaList.length === 1) {
         const media = mediaList[0];
-        // Mengirim media tunggal (foto atau video) dengan caption.
         await sock.sendMessage(sender, { [media.type]: { url: media.url }, caption: fullCaption }, { quoted: msg });
     } else {
-        // Mengirim beberapa media sebagai album.
         const albumItems = mediaList.map((item, index) => ({
             [item.type]: { url: item.url },
-            caption: index === 0 ? fullCaption : '' // Caption hanya pada item pertama.
+            caption: index === 0 ? fullCaption : ''
         }));
-        // Fungsi sendAlbumMessage diasumsikan ada di library/helper Anda.
         await sock.sendAlbumMessage(sender, albumItems, { quoted: msg });
     }
 }
@@ -38,27 +35,26 @@ async function startInstagramDownload(sock, msg, instagramUrl) {
     const sender = msg.key.remoteJid;
     const statusMsg = await sock.sendMessage(sender, { text: '⏳ Menganalisis link Instagram...' }, { quoted: msg });
 
+    // STRATEGI BARU: Coba API simpel (/itt) dulu, karena lebih stabil.
     try {
-        // Mencoba API utama terlebih dahulu (struktur respons detail)
-        const primaryApiUrl = `https://szyrineapi.biz.id/api/downloaders/ig?url=${encodeURIComponent(instagramUrl)}`;
+        const primaryApiUrl = `https://szyrineapi.biz.id/api/downloaders/itt?platform=instagram&url=${encodeURIComponent(instagramUrl)}`;
         const data = await safeApiGet(primaryApiUrl);
 
-        if (!data?.result?.media || data.result.media.length === 0) {
-            // Jika API utama tidak mengembalikan media, lempar error untuk memicu fallback.
-            throw new Error('Media tidak ditemukan dari API utama.');
+        // Perbaikan: Cek langsung 'data.download' bukan 'data.result.download'
+        if (!data?.download || data.download.length === 0) {
+            throw new Error('API utama (/itt) tidak mengembalikan media.');
         }
 
-        // Memproses data dari API utama
-        const mediaList = data.result.media.map(item => ({
-            type: item.tipe === 'foto' ? 'photo' : 'video', // Konversi 'foto' -> 'photo'
-            url: item.url
+        const mediaUrls = data.download;
+        const mediaList = mediaUrls.map(url => ({
+            type: url.includes('.mp4') ? 'video' : 'photo', // Tipe media ditebak dari URL
+            url: url
         }));
+        
+        // API ini tidak menyediakan caption, jadi kita buat caption default.
+        const fullCaption = `*Download Berhasil!* ✨\n\n${WATERMARK}`.trim();
 
-        const { caption } = data.result;
-        const username = data.result.akun?.username;
-        const fullCaption = `*Username:* @${username || 'N/A'}\n\n${caption || 'Tanpa caption.'}\n\n${WATERMARK}`.trim();
-
-        await sock.sendMessage(sender, { text: `✅ Berhasil mendapatkan *${mediaList.length}* media! Mengirim sekarang...`, edit: statusMsg.key });
+        await sock.sendMessage(sender, { text: `✅ Oke, dapet *${mediaList.length}* media! Ngirim sekarang...`, edit: statusMsg.key });
         await sendMedia(sock, msg, mediaList, fullCaption);
         await sock.sendMessage(sender, { delete: statusMsg.key });
 
@@ -66,24 +62,24 @@ async function startInstagramDownload(sock, msg, instagramUrl) {
         console.error('[IGDL Primary Error]', primaryError.message);
         await sock.sendMessage(sender, { text: '⏳ Gagal dengan API utama. Mencoba API cadangan...', edit: statusMsg.key });
 
+        // FALLBACK: Coba API kedua (/ig) yang lebih detail tapi kurang stabil.
         try {
-            // Mencoba API kedua (fallback) dari screenshot
-            const fallbackApiUrl = `https://szyrineapi.biz.id/api/downloaders/itt?platform=instagram&url=${encodeURIComponent(instagramUrl)}`;
+            const fallbackApiUrl = `https://szyrineapi.biz.id/api/downloaders/ig?url=${encodeURIComponent(instagramUrl)}`;
             const fallbackData = await safeApiGet(fallbackApiUrl);
-            
-            if (!fallbackData?.result?.download || fallbackData.result.download.length === 0) {
+
+            // API ini memiliki struktur 'result.media'
+            if (!fallbackData?.result?.media || fallbackData.result.media.length === 0) {
                 throw new Error(fallbackData.message || 'Tidak dapat mengambil media dari kedua API.');
             }
 
-            // Memproses data dari API cadangan
-            const mediaUrls = fallbackData.result.download;
-            const mediaList = mediaUrls.map(url => ({
-                type: url.includes('.mp4') ? 'video' : 'photo', // Menebak tipe media dari URL
-                url: url
+            const mediaList = fallbackData.result.media.map(item => ({
+                type: item.tipe === 'foto' ? 'photo' : 'video',
+                url: item.url
             }));
 
-            // API cadangan tidak menyediakan metadata
-            const fullCaption = `*Catatan:* Informasi caption tidak tersedia.\n\n${WATERMARK}`.trim();
+            const { caption } = fallbackData.result;
+            const username = fallbackData.result.akun?.username;
+            const fullCaption = `*Username:* @${username || 'N/A'}\n\n${caption || 'Tanpa caption.'}\n\n${WATERMARK}`.trim();
             
             await sock.sendMessage(sender, { text: `✅ Oke, dapat *${mediaList.length}* media dari API cadangan! Mengirim...`, edit: statusMsg.key });
             await sendMedia(sock, msg, mediaList, fullCaption);
@@ -98,11 +94,16 @@ async function startInstagramDownload(sock, msg, instagramUrl) {
 
 async function handleUrlInput(sock, msg, body, waitState) {
     const url = body.trim();
-    const instagramRegex = /https?:\/\/(www\.)?instagram\.com\/(p|reel)\/[\w-]+/;
+    // Regex untuk memastikan link adalah post atau reel Instagram
+    const instagramRegex = /https?:\/\/(www\.)?instagram\.com\/(p|reel|reels)\/[\w-]+/;
     if (!url || !instagramRegex.test(url)) {
         return sock.sendMessage(msg.key.remoteJid, { text: 'Link yang Anda kirim sepertinya bukan link post atau reel Instagram yang valid. Silakan coba lagi.' }, { quoted: msg });
     }
     await startInstagramDownload(sock, msg, url);
+    // Hapus state setelah selesai, karena sudah tidak menunggu input lagi
+    if (waitState && waitState.context && waitState.context.originalMsgKey) {
+        await extras.clear(sender);
+    }
 }
 
 export default async function execute(sock, msg, args, text, sender, extras) {
@@ -111,6 +112,7 @@ export default async function execute(sock, msg, args, text, sender, extras) {
         await startInstagramDownload(sock, msg, userUrl);
     } else {
         await sock.sendMessage(sender, { text: 'Silakan kirim link post atau reel Instagram yang ingin Anda unduh.' }, { quoted: msg });
-        await extras.set(sender, 'igdl_url', handleUrlInput, { extras, timeout: 120000, originalMsgKey: msg.key });
+        // Menggunakan extras.set yang diinjeksi oleh moduleRunner
+        await extras.set(sender, handleUrlInput, 120000, { originalMsgKey: msg.key });
     }
 }
