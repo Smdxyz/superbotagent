@@ -1,7 +1,7 @@
-// /modules/downloaders/igdl.js
+// /modules/downloaders/igdl.js (Final, Sesuai Dokumentasi Baileys-Pro)
 
 import { BOT_PREFIX, WATERMARK } from '../../config.js';
-import { safeApiGet } from '../../libs/apiHelper.js';
+import axios from 'axios';
 
 export const category = 'downloaders';
 export const description = 'Mengunduh media (foto/video/reels) dari Instagram.';
@@ -9,24 +9,46 @@ export const usage = `${BOT_PREFIX}igdl <link_instagram>`;
 export const aliases = ['ig'];
 export const energyCost = 4;
 
+const API_TIMEOUT = 60000; // 60 detik
+
 /**
- * Mengirim media yang telah didapatkan ke pengguna.
+ * Mengirim media yang telah didapatkan sesuai dokumentasi @fizzxydev/baileys-pro
  * @param {object} sock - Socket Baileys.
  * @param {object} msg - Objek pesan asli.
- * @param {Array<object>} mediaList - Daftar media [{ type, url }].
+ * @param {Array<object>} mediaList - Daftar media, format: [{ type: 'image' | 'video', url: string }].
  * @param {string} fullCaption - Caption lengkap untuk dikirim.
  */
 async function sendMedia(sock, msg, mediaList, fullCaption) {
     const sender = msg.key.remoteJid;
 
+    // KASUS 1: HANYA ADA SATU MEDIA (FOTO ATAU VIDEO)
+    // Sesuai dokumentasi, kirim menggunakan sock.sendMessage biasa.
     if (mediaList.length === 1) {
         const media = mediaList[0];
+        console.log(`[IGDL] Mengirim media tunggal tipe: ${media.type}`);
+        // [media.type] akan menjadi 'image' atau 'video', membentuk objek yang valid
+        // contoh: { image: { url: '...' }, caption: '...' }
         await sock.sendMessage(sender, { [media.type]: { url: media.url }, caption: fullCaption }, { quoted: msg });
-    } else {
-        const albumItems = mediaList.map((item, index) => ({
-            [item.type]: { url: item.url },
-            caption: index === 0 ? fullCaption : ''
-        }));
+        return;
+    }
+
+    // KASUS 2: ADA LEBIH DARI SATU MEDIA
+    // Sesuai dokumentasi, kirim sebagai album (carousel).
+    if (mediaList.length > 1) {
+        console.log(`[IGDL] Mengirim album berisi ${mediaList.length} media.`);
+        // Membuat array objek yang sesuai dengan format album di dokumentasi.
+        const albumItems = mediaList.map((item, index) => {
+            // Mengembalikan objek dengan kunci 'image' atau 'video' secara eksplisit.
+            const mediaObject = { [item.type]: { url: item.url } };
+            // Tambahkan caption hanya pada item pertama untuk menghindari duplikasi.
+            if (index === 0) {
+                mediaObject.caption = fullCaption;
+            }
+            return mediaObject;
+        });
+
+        // Panggil fungsi untuk mengirim album.
+        // Nama fungsi ini bisa bervariasi (misal: sendCarouselMessage), tapi `sendAlbumMessage` umum digunakan.
         await sock.sendAlbumMessage(sender, albumItems, { quoted: msg });
     }
 }
@@ -35,25 +57,22 @@ async function startInstagramDownload(sock, msg, instagramUrl) {
     const sender = msg.key.remoteJid;
     const statusMsg = await sock.sendMessage(sender, { text: '⏳ Menganalisis link Instagram...' }, { quoted: msg });
 
-    // STRATEGI BARU: Coba API simpel (/itt) dulu, karena lebih stabil.
     try {
-        const primaryApiUrl = `https://szyrineapi.biz.id/api/downloaders/itt?platform=instagram&url=${encodeURIComponent(instagramUrl)}`;
-        const data = await safeApiGet(primaryApiUrl);
+        const apiUrl = `https://szyrineapi.biz.id/api/downloaders/itt?platform=instagram&url=${encodeURIComponent(instagramUrl)}`;
+        const response = await axios.get(apiUrl, { timeout: API_TIMEOUT });
+        const data = response.data;
 
-        // Perbaikan: Cek langsung 'data.download' bukan 'data.result.download'
-        if (!data?.download || data.download.length === 0) {
+        if (response.status !== 200 || !data.result?.download || data.result.download.length === 0) {
             throw new Error('API utama (/itt) tidak mengembalikan media.');
         }
 
-        const mediaUrls = data.download;
+        const mediaUrls = data.result.download;
         const mediaList = mediaUrls.map(url => ({
-            type: url.includes('.mp4') ? 'video' : 'photo', // Tipe media ditebak dari URL
+            type: url.includes('.mp4') ? 'video' : 'image', // Tipe: 'image' atau 'video'
             url: url
         }));
         
-        // API ini tidak menyediakan caption, jadi kita buat caption default.
         const fullCaption = `*Download Berhasil!* ✨\n\n${WATERMARK}`.trim();
-
         await sock.sendMessage(sender, { text: `✅ Oke, dapet *${mediaList.length}* media! Ngirim sekarang...`, edit: statusMsg.key });
         await sendMedia(sock, msg, mediaList, fullCaption);
         await sock.sendMessage(sender, { delete: statusMsg.key });
@@ -62,18 +81,17 @@ async function startInstagramDownload(sock, msg, instagramUrl) {
         console.error('[IGDL Primary Error]', primaryError.message);
         await sock.sendMessage(sender, { text: '⏳ Gagal dengan API utama. Mencoba API cadangan...', edit: statusMsg.key });
 
-        // FALLBACK: Coba API kedua (/ig) yang lebih detail tapi kurang stabil.
         try {
             const fallbackApiUrl = `https://szyrineapi.biz.id/api/downloaders/ig?url=${encodeURIComponent(instagramUrl)}`;
-            const fallbackData = await safeApiGet(fallbackApiUrl);
+            const fallbackResponse = await axios.get(fallbackApiUrl, { timeout: API_TIMEOUT });
+            const fallbackData = fallbackResponse.data;
 
-            // API ini memiliki struktur 'result.media'
-            if (!fallbackData?.result?.media || fallbackData.result.media.length === 0) {
-                throw new Error(fallbackData.message || 'Tidak dapat mengambil media dari kedua API.');
+            if (fallbackResponse.status !== 200 || !fallbackData.result?.media || fallbackData.result.media.length === 0) {
+                throw new Error('API cadangan (/ig) juga gagal.');
             }
 
             const mediaList = fallbackData.result.media.map(item => ({
-                type: item.tipe === 'foto' ? 'photo' : 'video',
+                type: item.tipe === 'foto' ? 'image' : 'video', // Konversi 'foto' -> 'image'
                 url: item.url
             }));
 
@@ -86,24 +104,20 @@ async function startInstagramDownload(sock, msg, instagramUrl) {
             await sock.sendMessage(sender, { delete: statusMsg.key });
 
         } catch (fallbackError) {
-            console.error('[IGDL Fallback Error]', fallbackError);
+            console.error('[IGDL Fallback Error]', fallbackError.message);
             await sock.sendMessage(sender, { text: `❌ Gagal total: ${fallbackError.message}`, edit: statusMsg.key });
         }
     }
 }
 
+
 async function handleUrlInput(sock, msg, body, waitState) {
     const url = body.trim();
-    // Regex untuk memastikan link adalah post atau reel Instagram
     const instagramRegex = /https?:\/\/(www\.)?instagram\.com\/(p|reel|reels)\/[\w-]+/;
     if (!url || !instagramRegex.test(url)) {
         return sock.sendMessage(msg.key.remoteJid, { text: 'Link yang Anda kirim sepertinya bukan link post atau reel Instagram yang valid. Silakan coba lagi.' }, { quoted: msg });
     }
     await startInstagramDownload(sock, msg, url);
-    // Hapus state setelah selesai, karena sudah tidak menunggu input lagi
-    if (waitState && waitState.context && waitState.context.originalMsgKey) {
-        await extras.clear(sender);
-    }
 }
 
 export default async function execute(sock, msg, args, text, sender, extras) {
@@ -112,7 +126,6 @@ export default async function execute(sock, msg, args, text, sender, extras) {
         await startInstagramDownload(sock, msg, userUrl);
     } else {
         await sock.sendMessage(sender, { text: 'Silakan kirim link post atau reel Instagram yang ingin Anda unduh.' }, { quoted: msg });
-        // Menggunakan extras.set yang diinjeksi oleh moduleRunner
         await extras.set(sender, handleUrlInput, 120000, { originalMsgKey: msg.key });
     }
 }
