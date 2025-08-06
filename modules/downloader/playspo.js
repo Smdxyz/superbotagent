@@ -1,3 +1,5 @@
+// /modules/downloaders/playspo.js (FINAL VERSION)
+
 import { BOT_PREFIX, WATERMARK } from '../../config.js';
 import { sleep, getImageBuffer } from '../../libs/utils.js';
 import axios from 'axios';
@@ -86,9 +88,10 @@ export default async (sock, msg, args, text, sender, extras) => {
         await sock.sendMessage(sender, listMessage);
         await sock.sendMessage(sender, { delete: searchMsg.key });
 
-        const handleSpotifySelection = async (sock, msg, selectedId) => {
+        const handleSpotifySelection = async (sock, msg, selectedId, context) => {
             const spotifyUrl = selectedId.replace('spotify_dl_', '');
-            const selectedSong = results.find(song => song.url === spotifyUrl);
+            // Mengambil data lagu dari context yang disimpan
+            const selectedSong = context.searchResult.find(song => song.url === spotifyUrl);
 
             if (!selectedSong) {
                 return sock.sendMessage(sender, { text: `Waduh, pilihan lagunya aneh. Coba ulang dari awal.` }, { quoted: msg });
@@ -132,11 +135,11 @@ ${WATERMARK}`.trim();
             }
         };
         
-        if (extras && typeof extras.set === 'function') {
-            await extras.set(sender, 'playspo', handleSpotifySelection, { timeout: 120000 });
-        } else {
-            console.error("Peringatan: 'extras.set' tidak tersedia.");
-        }
+        await extras.set(sender, 'playspo', {
+            handler: handleSpotifySelection,
+            context: { searchResult: results }, // Menyimpan hasil pencarian
+            timeout: 120000
+        });
 
     } catch (err) {
         const targetKey = searchMsg ? { edit: searchMsg.key } : { quoted: msg };
