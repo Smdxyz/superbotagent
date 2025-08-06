@@ -1,3 +1,5 @@
+// /modules/downloaders/pinterest.js (FINAL & FULL CODE - WAITSTATE FIXED)
+
 import { BOT_PREFIX, WATERMARK } from '../../config.js';
 import { safeApiGet } from '../../libs/apiHelper.js';
 import { getImageBuffer } from '../../libs/utils.js';
@@ -46,8 +48,10 @@ async function sendAsAlbum(sock, msg, pins, query) {
     await sock.sendAlbumMessage(msg.key.remoteJid, albumItems, { quoted: msg });
 }
 
+// [PERBAIKAN] Signature fungsi handler diubah menjadi (sock, msg, body, context)
 async function handleSearchModeSelection(sock, msg, selectedMode, context) {
-    const { query, statusMsgKey } = context.data;
+    // [PERBAIKAN] Context diakses langsung
+    const { query, statusMsgKey } = context;
     const sender = msg.key.remoteJid;
 
     try {
@@ -87,8 +91,10 @@ export default async function execute(sock, msg, args, text, sender, extras) {
             sections: [{ title: "Opsi Pencarian", rows: listRows }]
         }, { quoted: msg });
 
-        await extras.set(sender, 'pinterest', handleSearchModeSelection, {
-            data: { query, statusMsgKey: statusMsg.key },
+        // [PERBAIKAN FINAL] Memanggil extras.set dengan cara baru yang benar dan aman
+        await extras.set(sender, 'pinterest', {
+            handler: handleSearchModeSelection,
+            context: { query, statusMsgKey: statusMsg.key },
             timeout: 120000
         });
 

@@ -1,13 +1,10 @@
-// /modules/downloaders/play.js (FINAL & FULL CODE)
+// /modules/downloaders/play.js (FINAL & FULL CODE - WAITSTATE FIXED)
 
 import { BOT_PREFIX } from '../../config.js';
-import { formatBytes, sleep } from '../../libs/utils.js'; // Menggunakan utils.js yang baru
+import { formatBytes, sleep } from '../../libs/utils.js';
 import axios from 'axios';
 import he from 'he';
 
-/**
- * Mencari video di YouTube.
- */
 async function searchYouTube(query) {
     const searchUrl = `https://szyrineapi.biz.id/api/youtube/search?q=${encodeURIComponent(query)}`;
     try {
@@ -21,14 +18,10 @@ async function searchYouTube(query) {
         }
         return null;
     } catch (error) {
-        console.error(`[PLAY SEARCH] Gagal mencari lagu "${query}":`, error.message);
         throw new Error(`Gagal menghubungi server pencarian.`);
     }
 }
 
-/**
- * Menangani proses unduhan dan pengiriman audio.
- */
 async function downloadAndSendAudio(sock, msg, youtubeUrl) {
     const sender = msg.key.remoteJid;
     const progressMessage = await sock.sendMessage(sender, { text: `Oke, siap! Lagunya lagi diproses ya... 🚀` }, { quoted: msg });
@@ -48,10 +41,7 @@ async function downloadAndSendAudio(sock, msg, youtubeUrl) {
         await editMsg(`⏳ Pekerjaan diterima. Menunggu server memproses...`);
 
         let finalResult = null;
-        const maxRetries = 30;
-        const retryDelay = 4000;
-
-        for (let i = 0; i < maxRetries; i++) {
+        for (let i = 0; i < 30; i++) {
             const statusResponse = await axios.get(statusCheckUrl, { timeout: 15000 });
             if (statusResponse.data.result?.status === 'completed') {
                 finalResult = statusResponse.data.result;
@@ -59,7 +49,7 @@ async function downloadAndSendAudio(sock, msg, youtubeUrl) {
             } else if (statusResponse.data.result?.status === 'failed') {
                 throw new Error('Proses di server gagal. Mungkin video dilindungi hak cipta.');
             }
-            await sleep(retryDelay); // Menggunakan sleep dari utils.js
+            await sleep(4000);
         }
 
         if (!finalResult) throw new Error('Waktu tunggu habis, server butuh waktu lebih lama.');
@@ -89,10 +79,7 @@ async function downloadAndSendAudio(sock, msg, youtubeUrl) {
     }
 }
 
-/**
- * Menangani event saat pengguna memilih lagu dari daftar.
- */
-async function handleSongSelection(sock, msg, selectedId) {
+async function handleSongSelection(sock, msg, selectedId, context) {
     const youtubeUrl = selectedId.replace('play_dl_', '');
     if (!/^(https?:\/\/)?(www\.)?(m\.)?(youtube\.com|youtu\.be)\/.+$/.test(youtubeUrl)) {
          return sock.sendMessage(msg.key.remoteJid, { text: "Link YouTube yang dipilih tidak valid." }, { quoted: msg });
@@ -100,7 +87,6 @@ async function handleSongSelection(sock, msg, selectedId) {
     await downloadAndSendAudio(sock, msg, youtubeUrl);
 }
 
-// Fungsi eksekusi utama
 export default async (sock, msg, args, text, sender, extras) => {
     if (!text) {
         return sock.sendMessage(sender, { text: `Mau cari lagu apa?\nContoh: *${BOT_PREFIX}play Laskar Pelangi*` }, { quoted: msg });
@@ -130,11 +116,11 @@ export default async (sock, msg, args, text, sender, extras) => {
         await sock.sendMessage(sender, listMessage);
         await sock.sendMessage(sender, { delete: sentMsg.key });
         
-        if (extras && typeof extras.set === 'function') {
-             await extras.set(sender, 'play', handleSongSelection);
-        } else {
-             console.error("Peringatan: 'extras.set' tidak tersedia.");
-        }
+        await extras.set(sender, 'play', {
+            handler: handleSongSelection,
+            timeout: 120000
+        });
+
     } catch (err) {
         const errorMessage = `❌ Gagal mencari: ${err.message}`;
         try {
@@ -145,7 +131,6 @@ export default async (sock, msg, args, text, sender, extras) => {
     }
 };
 
-// Metadata
 export const category = 'downloader';
 export const description = 'Cari dan kirim lagu dari YouTube sebagai MP3.';
 export const usage = `${BOT_PREFIX}play <judul lagu>`;
