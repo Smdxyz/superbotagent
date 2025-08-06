@@ -1,7 +1,7 @@
-// /modules/image/deepimg.js (FIXED & UPGRADED)
+// /modules/ai/deepimg.js (VERSI LENGKAP DENGAN EXPORT)
 
 import { BOT_PREFIX } from '../../config.js';
-import { safeApiGet } from '../../libs/apiHelper.js';
+import { safeApiGet } from '../../libs/apiHelper.js'; // Pastikan Anda memiliki file ini atau ganti dengan axios biasa
 
 export const category = 'ai';
 export const description = 'Membuat gambar dari deskripsi teks menggunakan AI (DeepImg).';
@@ -35,41 +35,31 @@ const presets = {
 };
 
 /**
- * (REVISED) Fungsi untuk memanggil API DeepImg.
- * Tahan banting terhadap format respons baru (plain text) dan lama (JSON).
+ * (REVISED & EXPORTED) Fungsi untuk memanggil API DeepImg.
  */
-async function createWithDeepImg(prompt, style, size) {
+export async function createWithDeepImg(prompt, style, size) {
     console.log(`[DEEPIMG] Calling API. Style: ${style}, Size: ${size}, Prompt: ${prompt.substring(0, 50)}...`);
 
     const encodedPrompt = encodeURIComponent(prompt);
     const apiUrl = `https://szyrineapi.biz.id/api/image/create/deepimg?prompt=${encodedPrompt}&style=${style}&size=${size}`;
 
+    // Menggunakan safeApiGet atau axios biasa
     const response = await safeApiGet(apiUrl);
 
-    // --- PERBAIKAN UTAMA DI SINI ---
-    // Prioritas 1: Cek jika respons adalah URL dalam bentuk string (format baru)
     if (typeof response === 'string' && response.startsWith('http')) {
         return decodeURIComponent(response).trim();
     }
 
-    // Prioritas 2: Cek format JSON (format lama)
-    let resultUrl = null;
-    if (response?.result?.url) {
-        resultUrl = response.result.url;
-    } else if (response?.url) { // Cadangan format JSON lain
-        resultUrl = response.url;
-    }
+    let resultUrl = response?.result?.url || response?.url;
     
     if (resultUrl) {
         return decodeURIComponent(resultUrl).trim();
     }
     
-    // Jika semua gagal, baru lempar error
     console.error('[DEEPIMG] Invalid API Response:', JSON.stringify(response, null, 2));
     throw new Error('Gagal membuat gambar, respons API tidak valid atau tidak berisi URL hasil.');
 }
 
-// Fungsi handlePresetSelection tidak perlu diubah
 async function handlePresetSelection(sock, msg, body, waitState) {
     const sender = msg.key.remoteJid;
     const selectedPresetId = body;
@@ -94,7 +84,6 @@ async function handlePresetSelection(sock, msg, body, waitState) {
     }
 }
 
-// Fungsi execute tidak perlu diubah
 export default async function execute(sock, msg, args, text, sender, extras) {
     const { set: setWaitingState } = extras;
     const userPrompt = text.trim();
