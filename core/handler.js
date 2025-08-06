@@ -1,3 +1,5 @@
+// /core/handler.js (FINAL VERSION)
+
 import { BOT_MODE, BOT_OWNER } from '../config.js';
 import { getOrCreateUserBasicData } from './firebase.js';
 import { getUserLocalData, updateAffection, deductUserEnergy } from './localDataHandler.js';
@@ -5,7 +7,7 @@ import { callGeminiForAction } from './aira_gemini_brain.js';
 import { executeCommand, getAllCommands } from './moduleRunner.js';
 import { getWaitState, clearWaitState, setWaitState } from './waitStateHandler.js';
 import { textToSpeech } from '../libs/apiClient.js';
-import { createWithDeepImg } from '../modules/ai/deepimg.js';
+import { createWithDeepImg } from '../modules/ai/deepimg.js'; // PASTIKAN JALUR INI BENAR!
 
 const conversationHistory = new Map();
 const MAX_HISTORY_LENGTH = 60;
@@ -73,7 +75,7 @@ export async function handler(sock, m) {
                 botResponseText = decision.parameters?.text || "Ini VN buat Tuan!";
                 try {
                     await sock.sendMessage(sender, { text: `Oke, Aira rekam suara dulu ya... 🎙️` }, { quoted: msg });
-                    const audioBuffer = await textToSpeech(decision.parameters?.text, decision.parameters?.lang || 'id');
+                    const audioBuffer = await textToSpeech(decision.parameters.text, decision.parameters.lang || 'id');
                     await sock.sendMessage(sender, { audio: audioBuffer, mimetype: 'audio/mpeg', ptt: true }, { quoted: msg });
                     updateAffection(internalId, 2, 'Happy');
                 } catch (error) {

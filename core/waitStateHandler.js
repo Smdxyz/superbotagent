@@ -1,33 +1,43 @@
-// /core/waitStateHandler.js - Manajer Status Tunggu
+// /core/waitStateHandler.js (FINAL VERSION)
 
 const waitStates = new Map();
 
 /**
- * Mendaftarkan seorang user ke dalam status tunggu untuk balasan.
+ * Mendaftarkan user ke dalam status tunggu dengan menggunakan satu objek konfigurasi yang jelas.
+ * Ini mencegah bug 'NaN' dan membuat kode lebih mudah dibaca.
+ *
  * @param {string} jid - JID user yang ditunggu.
- * @param {Function} handler - Fungsi yang akan dieksekusi saat user membalas. Fungsi ini menerima (sock, msg, body, context).
- * @param {number} [timeout=60000] - Waktu dalam milidetik sebelum state dihapus otomatis (default: 1 menit).
- * @param {object} [context={}] - Data tambahan yang mungkin dibutuhkan oleh fungsi handler.
+ * @param {string} command - Nama perintah yang menunggu (untuk debugging).
+ * @param {object} options - Opsi untuk state.
+ * @param {Function} options.handler - Fungsi yang akan dieksekusi saat user membalas. WAJIB ADA.
+ * @param {object} [options.context={}] - Data tambahan yang mungkin dibutuhkan oleh handler.
+ * @param {number} [options.timeout=60000] - Waktu dalam milidetik sebelum state kedaluwarsa.
  */
-export function setWaitState(jid, handler, timeout = 60000, context = {}) {
-    // Hapus state lama jika ada, untuk menghindari konflik
+export function setWaitState(jid, command, options = {}) {
+    const { handler, context = {}, timeout = 60000 } = options;
+
+    if (typeof handler !== 'function') {
+        console.error(`[WAIT_STATE_ERROR] Gagal set state untuk '${command}' karena handler bukan fungsi.`);
+        return;
+    }
+
     if (waitStates.has(jid)) {
         clearTimeout(waitStates.get(jid).timeoutId);
     }
 
     const timeoutId = setTimeout(() => {
-        console.log(`[WAIT_STATE] State untuk ${jid} telah kedaluwarsa.`);
+        console.log(`[WAIT_STATE] State '${command}' untuk ${jid} telah kedaluwarsa.`);
         waitStates.delete(jid);
     }, timeout);
 
-    waitStates.set(jid, { handler, context, timeoutId });
-    console.log(`[WAIT_STATE] User ${jid} sekarang dalam status tunggu selama ${timeout / 1000} detik.`);
+    waitStates.set(jid, { command, handler, context, timeoutId });
+    console.log(`[WAIT_STATE] User ${jid} sekarang dalam status tunggu untuk '${command}' selama ${timeout / 1000} detik.`);
 }
 
 /**
  * Mengambil state tunggu seorang user.
  * @param {string} jid - JID user.
- * @returns {object | undefined} Objek state jika ada, jika tidak undefined.
+ * @returns {object | undefined} Objek state jika ada.
  */
 export function getWaitState(jid) {
     return waitStates.get(jid);
@@ -39,8 +49,9 @@ export function getWaitState(jid) {
  */
 export function clearWaitState(jid) {
     if (waitStates.has(jid)) {
-        clearTimeout(waitStates.get(jid).timeoutId);
+        const { command, timeoutId } = waitStates.get(jid);
+        clearTimeout(timeoutId);
         waitStates.delete(jid);
-        console.log(`[WAIT_STATE] State untuk ${jid} telah dibersihkan.`);
+        console.log(`[WAIT_STATE] State '${command}' untuk ${jid} telah dibersihkan.`);
     }
 }
