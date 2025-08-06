@@ -1,5 +1,3 @@
-// /core/handler.js (VERSI LENGKAP DENGAN AKSI VN & GAMBAR)
-
 import { BOT_MODE, BOT_OWNER } from '../config.js';
 import { getOrCreateUserBasicData } from './firebase.js';
 import { getUserLocalData, updateAffection, deductUserEnergy } from './localDataHandler.js';
@@ -19,10 +17,7 @@ export async function handler(sock, m) {
 
     const sender = msg.key.remoteJid;
     const senderNumber = sender.split('@')[0];
-    if (BOT_MODE === 'private' && !BOT_OWNER.includes(senderNumber)) {
-        console.log(`[ACCESS DENIED] Pesan dari ${senderNumber} diabaikan karena bot dalam mode private.`);
-        return;
-    }
+    if (BOT_MODE === 'private' && !BOT_OWNER.includes(senderNumber)) return;
 
     const pushName = msg.pushName || "Tuan";
     const messageContent = msg.message;
@@ -34,15 +29,18 @@ export async function handler(sock, m) {
     const hasMedia = messageContent.imageMessage || messageContent.videoMessage;
 
     const waitState = getWaitState(sender);
-    if (waitState) {
+    if (waitState && body) {
         try {
             await waitState.handler(sock, msg, body, waitState.context);
         } catch (error) {
+            console.error(`[HANDLER_WAIT_STATE] Error saat menjalankan handler tunggu:`, error);
             await sock.sendMessage(sender, { text: `Aduh, ada error pas Aira proses balasanmu: ${error.message}` }, { quoted: msg });
         } finally {
-            clearWaitState(sender);
+            if (getWaitState(sender) === waitState) {
+                clearWaitState(sender);
+            }
         }
-        return; 
+        return;
     }
 
     const { internalId } = await getOrCreateUserBasicData(sender, pushName);
@@ -59,11 +57,7 @@ export async function handler(sock, m) {
         userHistory.push({ role: 'user', parts: [{ text: body }] });
         const decision = await callGeminiForAction(userHistory, pushName, userData.affection);
 
-        console.log(`[HANDLER_DEBUG] Keputusan dari Gemini:`, JSON.stringify(decision, null, 2));
-
-        if (!decision || typeof decision.action !== 'string') {
-            throw new Error("Respons dari Gemini tidak valid.");
-        }
+        if (!decision || typeof decision.action !== 'string') throw new Error("Respons Gemini tidak valid.");
 
         let botResponseText = '';
 
@@ -108,12 +102,12 @@ export async function handler(sock, m) {
                 const command = getAllCommands().get(commandName);
 
                 if (!command) {
-                    botResponseText = `Duh, Aira pikir bisa, tapi perintah '${commandName}' nggak ada. Aneh banget... 😥`;
+                    botResponseText = `Duh, Aira pikir bisa, tapi perintah '${commandName}' nggak ada. 😥`;
                     await sock.sendMessage(sender, { text: botResponseText }, { quoted: msg });
                     break;
                 }
                 if (!deductUserEnergy(internalId, command.energyCost || 0)) {
-                    botResponseText = `Tuan, energi Aira abis (butuh ${command.energyCost}). Istirahat dulu ya... ⚡`;
+                    botResponseText = `Tuan, energi Aira abis (butuh ${command.energyCost})... ⚡`;
                     await sock.sendMessage(sender, { text: botResponseText }, { quoted: msg });
                     break;
                 }
@@ -132,30 +126,20 @@ export async function handler(sock, m) {
                 conversationHistory.delete(sender);
                 return;
 
-            case 'error':
-                botResponseText = decision.response || "Duh, maaf... Aira lagi nge-lag 😥, coba tanya lagi deh.";
-                await sock.sendMessage(sender, { text: botResponseText }, { quoted: msg });
-                updateAffection(internalId, -5, 'Sad');
-                break;
-
             default:
-                botResponseText = decision.response || "Hmm, Aira agak bingung sama permintaan Tuan. Bisa coba dengan cara lain?";
+                botResponseText = decision.response || "Hmm, Aira agak bingung sama permintaan Tuan.";
                 await sock.sendMessage(sender, { text: botResponseText }, { quoted: msg });
                 break;
         }
 
         if (botResponseText) {
             userHistory.push({ role: 'model', parts: [{ text: botResponseText }] });
+            if (userHistory.length > MAX_HISTORY_LENGTH) userHistory.shift();
+            conversationHistory.set(sender, userHistory);
         }
-        while (userHistory.length > MAX_HISTORY_LENGTH) {
-            userHistory.shift();
-        }
-        conversationHistory.set(sender, userHistory);
-
     } catch (error) {
-        console.error(`[HANDLER_ERROR] Gagal total memproses pesan untuk ${sender}:`, error);
-        await sock.sendMessage(sender, { text: "Huaaa... sistem utama Aira korslet! 😭 Maaf ya, Tuan." }, { quoted: msg });
-        updateAffection(internalId, -10, 'Sad');
+        console.error(`[HANDLER_ERROR] Gagal total memproses pesan:`, error);
+        await sock.sendMessage(sender, { text: "Huaaa... sistem utama Aira korslet! 😭" }, { quoted: msg });
     } finally {
         await sock.sendPresenceUpdate('paused', sender);
     }
