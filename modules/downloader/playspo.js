@@ -1,10 +1,8 @@
-// /modules/downloaders/playspo.js (REVISI FINAL: PARSING EKSPLISIT & TANGGUH)
-
-import { BOT_PREFIX } from '../../config.js';
+import { BOT_PREFIX, WATERMARK } from '../../config.js';
+import { sleep, getImageBuffer } from '../../libs/utils.js';
 import axios from 'axios';
 import he from 'he';
 
-// Helper untuk search, sudah bagus dan pakai axios. Tidak perlu diubah.
 async function searchSpotify(query) {
     try {
         const endpoint = `https://szyrineapi.biz.id/api/downloaders/spotify/search?q=${encodeURIComponent(query)}&limit=5`;
@@ -17,89 +15,59 @@ async function searchSpotify(query) {
                  artists: he.decode(item.artists || 'Artis Tidak Diketahui'),
                  album: { ...item.album, name: he.decode(item.album?.name || 'Album Tidak Diketahui') }
             }));
-        } else {
-             console.warn(`[SPO-SEARCH] API return status ${res.data?.status} atau hasil kosong untuk "${query}".`);
-             return null;
         }
+        return null;
     } catch (e) {
-        console.error(`[SPO-SEARCH] Gagal nyari lagu Spotify "${query}":`, e.message);
+        console.error(`[SPO-SEARCH] Gagal mencari lagu Spotify "${query}":`, e.message);
+        throw new Error('Gagal menghubungi server pencarian Spotify.');
     }
-    return null;
 }
 
-// Helper untuk download, sudah tangguh tapi parsing disesuaikan.
-async function downloadSpotifyToBuffer(spotifyUrl, maxRetries = 3, retryDelayMs = 3000) {
-    let downloadUrl = null;
-
+async function downloadSpotifyToBuffer(spotifyUrl) {
+    let directDownloadUrl;
     try {
         const apiEndpoint = `https://szyrineapi.biz.id/api/downloaders/spotify?url=${encodeURIComponent(spotifyUrl)}`;
         const apiRes = await axios.get(apiEndpoint, { timeout: 120000 });
         const rawData = apiRes.data;
         
-        // [FIX] Parsing fleksibel: support result.results.downloadUrl dan result.downloadUrl
-        if (rawData?.status === 200) {
-            if (rawData.result?.results?.downloadUrl) {
-                downloadUrl = rawData.result.results.downloadUrl;
-            } else if (rawData.result?.downloadUrl) {
-                downloadUrl = rawData.result.downloadUrl;
-            } else {
-                throw new Error('Struktur respons API tidak sesuai, `downloadUrl` tidak ditemukan.');
-            }
-        } else {
-            throw new Error(`API Spotify gagal memberikan link download. Status: ${rawData?.status}`);
+        directDownloadUrl = rawData.result?.downloadUrl || rawData.result?.results?.downloadUrl;
+
+        if (!directDownloadUrl) {
+            throw new Error('API tidak mengembalikan `downloadUrl` yang valid.');
         }
-
     } catch (e) {
-        console.error(`[SPO-DOWNLOAD] Gagal panggil API download:`, e.message);
-        throw new Error(`Gagal menghubungi server download Spotify: ${e.message}`);
+        throw new Error(`Gagal mendapatkan link download dari server: ${e.message}`);
     }
 
-    if (!downloadUrl) {
-        throw new Error('Tidak dapat menemukan link download dari API Spotify.');
-    }
-
-    // Retry logic tetap
     let lastDownloadError = null;
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        console.log(`[SPO-DOWNLOAD] Mencoba unduh dari link (Percobaan ${attempt}/${maxRetries})`);
+    for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-            const audioRes = await axios({
-                method: 'GET', url: downloadUrl, responseType: 'arraybuffer', timeout: 180000
-            });
+            const audioRes = await axios.get(directDownloadUrl, { responseType: 'arraybuffer', timeout: 180000 });
             const audioBuffer = Buffer.from(audioRes.data);
-
-            if (audioBuffer.length < 10240) {
-                 throw new Error(`File yang diunduh terlalu kecil (${audioBuffer.length} bytes).`);
-            }
-            console.log(`[SPO-DOWNLOAD] Berhasil mengunduh (Percobaan ${attempt}). Ukuran: ${audioBuffer.length} bytes.`);
+            if (audioBuffer.length < 10240) throw new Error(`File audio rusak atau terlalu kecil.`);
+            
             return audioBuffer;
-
         } catch (e) {
             lastDownloadError = e;
-            console.warn(`[SPO-DOWNLOAD FAIL] Percobaan ${attempt} gagal: ${e.message}`);
-            if (attempt < maxRetries) {
-                console.log(`[SPO-DOWNLOAD] Menunggu ${retryDelayMs}ms sebelum coba lagi...`);
-                await new Promise(resolve => setTimeout(resolve, retryDelayMs));
-            }
+            if (attempt < 3) await sleep(3000);
         }
     }
     
-    throw new Error(`Gagal mengunduh file audio setelah ${maxRetries} percobaan. (Penyebab: ${lastDownloadError ? lastDownloadError.message : 'Unknown error'})`);
+    throw new Error(`Gagal mengunduh file audio setelah 3 percobaan. Penyebab: ${lastDownloadError.message}`);
 }
 
-// EKSEKUSI PERINTAH UTAMA
 export default async (sock, msg, args, text, sender, extras) => {
     if (!text) {
         return sock.sendMessage(sender, { text: `Mau cari lagu apa dari Spotify?\n\nContoh: *${BOT_PREFIX}playspo JKT48 Seventeen*` }, { quoted: msg });
     }
 
-    let sentMsg;
+    let searchMsg;
     try {
-        sentMsg = await sock.sendMessage(sender, { text: `Oke, gass! Nyari lagu *"${text}"* di Spotify... 🎵` }, { quoted: msg });
+        searchMsg = await sock.sendMessage(sender, { text: `Oke, gass! Nyari lagu *"${text}"* di Spotify... 🎵` }, { quoted: msg });
 
         const results = await searchSpotify(text);
         if (!results || results.length === 0) {
-            return sock.sendMessage(sender, { text: `Yah, lagunya gak nemu di Spotify 😥. Coba judul lain.`, edit: sentMsg.key });
+            return sock.sendMessage(sender, { text: `Yah, lagunya gak nemu di Spotify 😥. Coba judul lain.`, edit: searchMsg.key });
         }
         
         const songRows = results.map((song) => ({
@@ -116,22 +84,22 @@ export default async (sock, msg, args, text, sender, extras) => {
         };
         
         await sock.sendMessage(sender, listMessage);
-        await sock.sendMessage(sender, { delete: sentMsg.key });
+        await sock.sendMessage(sender, { delete: searchMsg.key });
 
         const handleSpotifySelection = async (sock, msg, selectedId) => {
-            const selectedUrl = selectedId.replace('spotify_dl_', '');
-            const selectedSong = results.find(song => song.url === selectedUrl);
+            const spotifyUrl = selectedId.replace('spotify_dl_', '');
+            const selectedSong = results.find(song => song.url === spotifyUrl);
 
             if (!selectedSong) {
-                return sock.sendMessage(sender, { text: `Waduh, pilihan lagunya aneh. Coba ulang.` }, { quoted: msg });
+                return sock.sendMessage(sender, { text: `Waduh, pilihan lagunya aneh. Coba ulang dari awal.` }, { quoted: msg });
             }
 
-            const waitingMsg = await sock.sendMessage(sender, { text: `Oke, siap! Lagi nyiapin...\n\n*Lagu:* ${selectedSong.title}\n*Artis:* ${selectedSong.artists}`}, { quoted: msg });
+            const waitingMsg = await sock.sendMessage(sender, { text: `Oke, pilihan diterima! Mulai proses download untuk:\n\n*${selectedSong.title}*...`}, { quoted: msg });
             const waitingKey = waitingMsg.key;
 
             try {
-                const audioBuffer = await downloadSpotifyToBuffer(selectedSong.url);
-                await sock.sendMessage(sender, { text: `✅ Download kelar! Siap dikirim...`, edit: waitingKey });
+                const audioBuffer = await downloadSpotifyToBuffer(spotifyUrl);
+                await sock.sendMessage(sender, { text: `✅ Download selesai! Siap kirim...`, edit: waitingKey });
 
                 const fullCaption = `
 🎵 *Judul:* ${selectedSong.title}
@@ -140,42 +108,38 @@ export default async (sock, msg, args, text, sender, extras) => {
 ⏱️ *Durasi:* ${selectedSong.duration.formatted}
 🗓️ *Rilis:* ${selectedSong.album.release_date || 'N/A'}
 
-_Powered by Szyrine API_`.trim();
+${WATERMARK}`.trim();
 
-                let thumbnailBuffer;
-                if (selectedSong.album?.image_url) {
-                    try {
-                        const thumbRes = await axios({ url: selectedSong.album.image_url, responseType: 'arraybuffer' });
-                        thumbnailBuffer = Buffer.from(thumbRes.data);
-                    } catch (thumbError) {
-                        console.warn("[SPO-THUMBNAIL] Gagal unduh thumbnail:", thumbError.message);
-                    }
-                }
+                const thumbnailBuffer = await getImageBuffer(selectedSong.album?.image_url);
 
-                await sock.sendMessage(sender, { image: thumbnailBuffer, caption: fullCaption }, { quoted: msg });
-                await sock.sendMessage(sender, { audio: audioBuffer, mimetype: 'audio/mpeg', fileName: `${selectedSong.title}.mp3` }, { quoted: msg });
+                await sock.sendMessage(sender, { 
+                    image: thumbnailBuffer || undefined,
+                    caption: fullCaption 
+                }, { quoted: msg });
+                
+                await sock.sendMessage(sender, { 
+                    audio: audioBuffer, 
+                    mimetype: 'audio/mpeg', 
+                    fileName: `${selectedSong.title}.mp3` 
+                }, { quoted: msg });
+
                 await sock.sendMessage(sender, { delete: waitingKey });
 
             } catch (err) {
-                console.error('[ERROR SPOTIFY SELECTION]', err);
+                console.error('[ERROR SPOTIFY DOWNLOAD]', err);
                 const errorMessage = `Waduh, gagal proses lagunya 😵‍💫\n*Penyebab:* ${err.message}`;
-                try {
-                    await sock.sendMessage(sender, { text: errorMessage, edit: waitingKey });
-                } catch (editError) {
-                    await sock.sendMessage(sender, { text: errorMessage }, { quoted: msg });
-                }
+                await sock.sendMessage(sender, { text: errorMessage, edit: waitingKey });
             }
         };
         
         if (extras && typeof extras.set === 'function') {
-            await extras.set(sender, 'playspo', handleSpotifySelection);
+            await extras.set(sender, 'playspo', handleSpotifySelection, { timeout: 120000 });
         } else {
-            console.error("Warning: 'extras.set' tidak tersedia. Pilihan lagu tidak akan berfungsi.");
+            console.error("Peringatan: 'extras.set' tidak tersedia.");
         }
 
     } catch (err) {
-        console.error('[ERROR SPOTIFY SEARCH]', err);
-        const targetKey = sentMsg ? { edit: sentMsg.key } : { quoted: msg };
+        const targetKey = searchMsg ? { edit: searchMsg.key } : { quoted: msg };
         await sock.sendMessage(sender, { text: `❌ Gagal melakukan pencarian: ${err.message}` }, targetKey);
     }
 };
