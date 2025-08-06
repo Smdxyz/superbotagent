@@ -1,31 +1,16 @@
-// /core/handler.js (VERSI FINAL DENGAN WAIT STATE & FORMATBYTES)
+// /core/handler.js (VERSI LENGKAP DENGAN AKSI VN & GAMBAR)
 
+import { BOT_MODE, BOT_OWNER } from '../config.js';
 import { getOrCreateUserBasicData } from './firebase.js';
 import { getUserLocalData, updateAffection, deductUserEnergy } from './localDataHandler.js';
 import { callGeminiForAction } from './aira_gemini_brain.js';
 import { executeCommand, getAllCommands } from './moduleRunner.js';
-import { getWaitState, clearWaitState } from './waitStateHandler.js';
-import { uploadToSzyrine } from '../libs/apiUploader.js';
-import { streamToBuffer } from '../libs/utils.js';
-import { downloadContentFromMessage } from '@fizzxydev/baileys-pro';
+import { getWaitState, clearWaitState, setWaitState } from './waitStateHandler.js';
+import { textToSpeech } from '../libs/apiClient.js';
+import { createWithDeepImg } from '../modules/ai/deepimg.js';
 
 const conversationHistory = new Map();
-const MAX_HISTORY_LENGTH = 8;
-
-/**
- * Mengubah byte menjadi format yang mudah dibaca (KB, MB, GB).
- * @param {number} bytes - Jumlah byte.
- * @param {number} decimals - Jumlah angka desimal.
- * @returns {string} Ukuran file yang diformat.
- */
-export function formatBytes(bytes, decimals = 2) {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const dm = decimals < 0 ? 0 : decimals;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
-}
+const MAX_HISTORY_LENGTH = 60;
 
 export async function handler(sock, m) {
     if (!m || !m.messages || m.messages.length === 0) return;
@@ -33,9 +18,14 @@ export async function handler(sock, m) {
     if (msg.key.fromMe || !msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
     const sender = msg.key.remoteJid;
+    const senderNumber = sender.split('@')[0];
+    if (BOT_MODE === 'private' && !BOT_OWNER.includes(senderNumber)) {
+        console.log(`[ACCESS DENIED] Pesan dari ${senderNumber} diabaikan karena bot dalam mode private.`);
+        return;
+    }
+
     const pushName = msg.pushName || "Tuan";
     const messageContent = msg.message;
-    // Ekstrak isi pesan dari berbagai kemungkinan tipe balasan
     const body = messageContent.conversation
                  || messageContent.extendedTextMessage?.text
                  || messageContent.buttonsResponseMessage?.selectedButtonId
@@ -43,54 +33,36 @@ export async function handler(sock, m) {
                  || '';
     const hasMedia = messageContent.imageMessage || messageContent.videoMessage;
 
-    // --- [LOGIKA WAIT STATE] ---
-    // Cek apakah user ini sedang dalam status tunggu sebelum melakukan hal lain.
     const waitState = getWaitState(sender);
     if (waitState) {
-        console.log(`[HANDLER] Menemukan wait state untuk ${sender}. Memproses balasan langsung...`);
         try {
-            // Jalankan fungsi handler yang sudah didaftarkan oleh modul sebelumnya.
             await waitState.handler(sock, msg, body, waitState.context);
         } catch (error) {
-            console.error(`[HANDLER_WAIT_STATE] Error saat menjalankan handler tunggu untuk ${sender}:`, error);
             await sock.sendMessage(sender, { text: `Aduh, ada error pas Aira proses balasanmu: ${error.message}` }, { quoted: msg });
         } finally {
-            // Hapus state setelah selesai dieksekusi, baik berhasil maupun gagal.
             clearWaitState(sender);
         }
-        return; // Hentikan eksekusi di sini, jangan teruskan ke AI.
+        return; 
     }
-    // --- [AKHIR LOGIKA WAIT STATE] ---
 
-    // Jika tidak ada wait state, lanjutkan alur normal...
     const { internalId } = await getOrCreateUserBasicData(sender, pushName);
     const userData = getUserLocalData(internalId, sender);
     if (userData.isMuted && Date.now() < userData.muteExpiresAt) return;
 
     const userHistory = conversationHistory.get(sender) || [];
-
     if (!body && !hasMedia) return;
 
     try {
         await sock.sendPresenceUpdate('composing', sender);
-        let mediaUrl = null;
-        if (hasMedia) {
-            // Logika untuk mengunggah media jika ada
-        }
+        if (!body) return;
 
-        const fullUserPrompt = mediaUrl ? `${body} [Info Media: ${mediaUrl}]` : body;
-        if (!fullUserPrompt) return;
-
-        userHistory.push({ role: 'user', parts: [{ text: fullUserPrompt }] });
-
+        userHistory.push({ role: 'user', parts: [{ text: body }] });
         const decision = await callGeminiForAction(userHistory, pushName, userData.affection);
 
-        console.log(`[HANDLER_DEBUG] Keputusan mentah dari Gemini untuk ${sender}:`, JSON.stringify(decision, null, 2));
+        console.log(`[HANDLER_DEBUG] Keputusan dari Gemini:`, JSON.stringify(decision, null, 2));
 
         if (!decision || typeof decision.action !== 'string') {
-            console.error(`[HANDLER_FATAL] Respons dari Gemini tidak valid.`, decision);
-            await sock.sendMessage(sender, { text: "Duh, Aira dapet balasan aneh dari pusat data, jadi bingung... Coba lagi deh, Tuan." }, { quoted: msg });
-            return;
+            throw new Error("Respons dari Gemini tidak valid.");
         }
 
         let botResponseText = '';
@@ -103,6 +75,34 @@ export async function handler(sock, m) {
                 if (decision.action === 'chat') updateAffection(internalId, 1, 'Happy');
                 break;
 
+            case 'send_vn':
+                botResponseText = decision.parameters?.text || "Ini VN buat Tuan!";
+                try {
+                    await sock.sendMessage(sender, { text: `Oke, Aira rekam suara dulu ya... 🎙️` }, { quoted: msg });
+                    const audioBuffer = await textToSpeech(decision.parameters?.text, decision.parameters?.lang || 'id');
+                    await sock.sendMessage(sender, { audio: audioBuffer, mimetype: 'audio/mpeg', ptt: true }, { quoted: msg });
+                    updateAffection(internalId, 2, 'Happy');
+                } catch (error) {
+                    await sock.sendMessage(sender, { text: `Aduh, maaf, Tuan... pita suara Aira lagi serak 😥. Gagal bikin VN: ${error.message}` }, { quoted: msg });
+                }
+                break;
+
+            case 'generate_and_send_image':
+                const prompt = decision.parameters?.prompt;
+                if (!prompt) {
+                    await sock.sendMessage(sender, { text: "Aira mau gambar, tapi nggak tau mau gambar apa... 😥" }, { quoted: msg });
+                    break;
+                }
+                try {
+                    await sock.sendMessage(sender, { text: `Siap! Aira mulai gambar imajinasi Tuan: *"${prompt.substring(0, 50)}..."*. Ini butuh waktu sebentar yaa~ 🎨` }, { quoted: msg });
+                    const imageUrl = await createWithDeepImg(prompt, 'anime', '1:1');
+                    await sock.sendMessage(sender, { image: { url: imageUrl }, caption: `Ini dia hasil gambarnya, Tuan ${pushName}! Suka nggak?\n\n*Prompt Detail:* _${prompt}_` }, { quoted: msg });
+                    updateAffection(internalId, 5, 'Happy');
+                } catch (error) {
+                    await sock.sendMessage(sender, { text: `Huaa, maaf... Kanvas Aira sobek 😭. Gagal gambar: ${error.message}` }, { quoted: msg });
+                }
+                break;
+
             case 'tool_use':
                 const commandName = decision.tool;
                 const command = getAllCommands().get(commandName);
@@ -112,7 +112,6 @@ export async function handler(sock, m) {
                     await sock.sendMessage(sender, { text: botResponseText }, { quoted: msg });
                     break;
                 }
-
                 if (!deductUserEnergy(internalId, command.energyCost || 0)) {
                     botResponseText = `Tuan, energi Aira abis (butuh ${command.energyCost}). Istirahat dulu ya... ⚡`;
                     await sock.sendMessage(sender, { text: botResponseText }, { quoted: msg });
@@ -120,15 +119,14 @@ export async function handler(sock, m) {
                 }
 
                 const parameters = decision.parameters || {};
-                if (mediaUrl) parameters.media_url = mediaUrl;
-
                 const args = Object.values(parameters);
                 const text = args.join(' ');
 
                 botResponseText = `Siap laksanakan, Tuan ${pushName}! Aira mulai kerjain perintah *${commandName}* ya. Tunggu sebentar! 😉`;
                 await sock.sendMessage(sender, { text: botResponseText }, { quoted: msg });
 
-                executeCommand(commandName, sock, msg, args, text, sender, {});
+                const extras = { set: setWaitState, clear: clearWaitState, originalMsg: msg };
+                await executeCommand(commandName, sock, msg, args, text, sender, extras);
 
                 updateAffection(internalId, 5, 'Happy');
                 conversationHistory.delete(sender);
@@ -141,7 +139,6 @@ export async function handler(sock, m) {
                 break;
 
             default:
-                console.warn(`[HANDLER_WARN] Menerima 'action' yang tidak dikenal: '${decision.action}'`);
                 botResponseText = decision.response || "Hmm, Aira agak bingung sama permintaan Tuan. Bisa coba dengan cara lain?";
                 await sock.sendMessage(sender, { text: botResponseText }, { quoted: msg });
                 break;
