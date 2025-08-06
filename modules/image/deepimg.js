@@ -41,9 +41,8 @@ export async function createWithDeepImg(prompt, style, size) {
     console.log(`[DEEPIMG] Calling API. Style: ${style}, Size: ${size}, Prompt: ${prompt.substring(0, 50)}...`);
 
     const encodedPrompt = encodeURIComponent(prompt);
-    const apiUrl = `https://szyrineapi.biz.id/api/image/create/deepimg?prompt=${encodedPrompt}&style=${style}&size=${size}`;
+    const apiUrl = `https://szyrineapi.biz.id/api/images/create/deepimg?prompt=${encodedPrompt}&style=${style}&size=${size}`;
 
-    // Menggunakan safeApiGet atau axios biasa
     const response = await safeApiGet(apiUrl);
 
     if (typeof response === 'string' && response.startsWith('http')) {
@@ -107,10 +106,15 @@ export default async function execute(sock, msg, args, text, sender, extras) {
             buttonText: "Lihat Pilihan Gaya",
             sections
         }, { quoted: msg });
-        await setWaitingState(sender, 'deepimg', handlePresetSelection, {
-            dataTambahan: { prompt: userPrompt },
+
+        // --- FIX: Memanggil setWaitingState dengan argumen yang benar ---
+        await setWaitingState(sender, 'deepimg', {
+            handler: handlePresetSelection,
+            context: { dataTambahan: { prompt: userPrompt } },
             timeout: 120000
         });
+        // --- AKHIR PERBAIKAN ---
+
     } catch (error) {
         console.error('[DEEPIMG] Gagal pada tahap awal:', error);
         await sock.sendMessage(sender, { text: `❌ Gagal menyiapkan generator: ${error.message}` }, { quoted: msg });
