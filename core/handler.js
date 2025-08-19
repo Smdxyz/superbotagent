@@ -1,6 +1,6 @@
 // /core/handler.js (FINAL VERSION)
 
-import { BOT_MODE, BOT_OWNER } from '../config.js';
+import { BOT_MODE, BOT_OWNER, BOT_PREFIX } from '../config.js';
 import { getOrCreateUserBasicData } from './firebase.js';
 import { getUserLocalData, updateAffection, deductUserEnergy } from './localDataHandler.js';
 import { callGeminiForAction } from './aira_gemini_brain.js';
@@ -55,6 +55,27 @@ export async function handler(sock, m) {
     try {
         await sock.sendPresenceUpdate('composing', sender);
         if (!body) return;
+
+        if (body.startsWith(BOT_PREFIX)) {
+            const withoutPrefix = body.slice(BOT_PREFIX.length).trim();
+            const [commandNameRaw, ...args] = withoutPrefix.split(/\s+/);
+            const commandName = commandNameRaw?.toLowerCase();
+            console.log(`[HANDLER_PREFIX] command=${commandName} args=${args.join(' ')}`);
+            const command = getAllCommands().get(commandName);
+            if (!command) {
+                await sock.sendMessage(sender, { text: `Perintah '${commandName}' nggak ada. 😥` }, { quoted: msg });
+                return;
+            }
+            if (!deductUserEnergy(internalId, command.energyCost || 0)) {
+                await sock.sendMessage(sender, { text: `Tuan, energi Aira abis (butuh ${command.energyCost})... ⚡` }, { quoted: msg });
+                return;
+            }
+            const extras = { set: setWaitState, clear: clearWaitState, originalMsg: msg };
+            await executeCommand(commandName, sock, msg, args, args.join(' '), sender, extras);
+            updateAffection(internalId, 5, 'Happy');
+            conversationHistory.delete(sender);
+            return;
+        }
 
         userHistory.push({ role: 'user', parts: [{ text: body }] });
         const decision = await callGeminiForAction(userHistory, pushName, userData.affection);
