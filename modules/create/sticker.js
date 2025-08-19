@@ -52,6 +52,13 @@ export default async function execute(sock, msg, args, text, sender) {
         mediaType = 'video';
     }
 
+    console.log('[STICKER] request received', {
+        sender,
+        packname,
+        author,
+        mediaType: mediaType || 'none'
+    });
+
     // Jika setelah semua pengecekan, media tidak ditemukan, kirim pesan error.
     if (!mediaMessage) {
         return sock.sendMessage(sender, {
@@ -65,12 +72,13 @@ export default async function execute(sock, msg, args, text, sender) {
     try {
         // Download media menggunakan objek dan tipe yang sudah benar
         const stream = await downloadContentFromMessage(mediaMessage, mediaType);
-        
+
         let mediaBuffer = Buffer.from([]);
         for await (const chunk of stream) {
             mediaBuffer = Buffer.concat([mediaBuffer, chunk]);
         }
-        
+        console.log('[STICKER] media downloaded', { size: mediaBuffer.length });
+
         // Buat instance Sticker
         const stickerInstance = new Sticker(mediaBuffer, {
             pack: packname,
@@ -83,27 +91,30 @@ export default async function execute(sock, msg, args, text, sender) {
         });
 
         const stickerBuffer = await stickerInstance.toBuffer();
+        console.log('[STICKER] sticker buffer created', { size: stickerBuffer.length });
 
         // Kirim stiker
         await sock.sendMessage(sender, {
             sticker: stickerBuffer
         }, { quoted: msg }); // Kirim dengan quote agar lebih kontekstual
 
-        // Hapus pesan "memproses"
-        await sock.sendMessage(sender, { delete: processingMsg.key });
-
     } catch (error) {
-        console.error('[ERROR STICKER]', error);
-        
-        await sock.sendMessage(sender, { delete: processingMsg.key });
-        
+        console.error('[ERROR STICKER]', error.stack);
+
         let errorMessage = `Aduh, gagal bikin stiker 😭\n*Penyebab:* ${error.message}`;
         if (error.message?.includes('empty media key') || error.message?.includes('cannot derive')) {
             errorMessage = 'Aduh, gagal bikin stiker 😭\nMedia yang Anda reply mungkin sudah terlalu lama (kadaluwarsa), merupakan "View Once" yang sudah dibuka, atau tidak bisa diunduh lagi.';
         } else if (error.message?.includes('buffer is not supported')) {
             errorMessage = 'Aduh, gagal bikin stiker 😭\nFormat media ini sepertinya tidak didukung. Coba pakai gambar/video lain.';
         }
-        
+
         await sock.sendMessage(sender, { text: errorMessage }, { quoted: msg });
+    } finally {
+        try {
+            await sock.sendMessage(sender, { delete: processingMsg.key });
+        } catch (e) {
+            console.error('[STICKER] failed to delete processing message', e);
+        }
     }
 }
+
