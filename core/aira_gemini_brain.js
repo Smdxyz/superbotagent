@@ -11,7 +11,7 @@ if (!process.env.GEMINI_API_KEY) {
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 // Gunakan model yang mendukung input gambar (vision), seperti gemini-1.5-flash
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }); 
+const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" }); 
 const API_TIMEOUT_MS = 25000;
 
 function getToolsAsString() {
