@@ -1,4 +1,4 @@
-// /modules/ai/upscale.js
+// /modules/ai/gantirambut.js
 
 import { downloadContentFromMessage } from '@fizzxydev/baileys-pro';
 import axios from 'axios';
@@ -11,9 +11,9 @@ import { BOT_PREFIX } from '../../config.js';
 // =================================================================
 
 export const category = 'ai';
-export const description = 'Memperbesar resolusi gambar menjadi 2x atau 4x lebih besar.';
-export const usage = `Kirim/Reply foto dengan caption:\n${BOT_PREFIX}upscale <2 atau 4>`;
-export const aliases = ['perbesar', 'zoomhd'];
+export const description = 'Mengubah gaya rambut pada sebuah foto berdasarkan deskripsi teks.';
+export const usage = `Kirim/Reply foto dengan caption:\n${BOT_PREFIX}gantirambut <model rambut>`;
+export const aliases = ['hairai', 'ubahrambut'];
 export const requiredTier = 'Basic';
 export const energyCost = 15;
 
@@ -22,58 +22,63 @@ export const energyCost = 15;
 // =================================================================
 
 export default async function execute(sock, msg, args, text, sender) {
+    // --- VALIDASI INPUT ---
+    const prompt = text.trim();
+    if (!prompt) {
+        return sock.sendMessage(sender, {
+            text: `Perintahnya belum lengkap. Kamu mau ganti rambut jadi model apa?\n\n*Contoh:*\n*${BOT_PREFIX}gantirambut model bob pirang*`
+        }, { quoted: msg });
+    }
+
     const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
     let mediaMessage;
 
+    // Cari gambar di pesan yang dikirim atau di pesan yang di-reply
     if (msg.message?.imageMessage) {
         mediaMessage = msg.message.imageMessage;
     } else if (quoted?.imageMessage) {
         mediaMessage = quoted.imageMessage;
     } else {
-        return sock.sendMessage(sender, { text: `Gambarnya mana?` }, { quoted: msg });
-    }
-    
-    // Validasi skala, default ke 2 jika tidak valid
-    let scale = parseInt(args[0]);
-    if (scale !== 2 && scale !== 4) {
-        scale = 2; // Default scale
+        return sock.sendMessage(sender, {
+            text: `Gambarnya mana? Kirim foto dengan caption atau reply foto yang sudah ada.`
+        }, { quoted: msg });
     }
 
-    const initialMsg = await sock.sendMessage(sender, { text: `🔎 Aira siapin kaca pembesar... Proses upscale ${scale}x dimulai!` }, { quoted: msg });
+    const initialMsg = await sock.sendMessage(sender, { text: '✂️ Aira lagi siapin alat salon, tunggu sebentar ya...' }, { quoted: msg });
 
     try {
-        // 1. Download gambar
+        // 1. Download gambar dari WhatsApp
         const stream = await downloadContentFromMessage(mediaMessage, 'image');
         let imageBuffer = Buffer.from([]);
         for await (const chunk of stream) {
             imageBuffer = Buffer.concat([imageBuffer, chunk]);
         }
 
-        // 2. Kirim ke API untuk memulai job
+        // 2. Kirim gambar dan prompt ke API (POST Request)
         const form = new FormData();
         form.append('image', imageBuffer, { filename: 'image.jpg', contentType: 'image/jpeg' });
-        form.append('scale', scale);
+        form.append('prompt', prompt);
 
-        const uploadResponse = await axios.post('https://szyrineapi.biz.id/api/images/pixnova/upscale', form, {
+        const uploadResponse = await axios.post('https://szyrineapi.biz.id/api/images/pixnova/change-hair', form, {
             headers: { ...form.getHeaders() },
-            timeout: 60000
+            timeout: 60000 // Timeout 60 detik
         });
 
         if (uploadResponse.data?.status !== 200 || !uploadResponse.data.result?.jobId) {
-            throw new Error('Gagal memulai proses upscale. Respons API tidak valid.');
+            throw new Error('Gagal memulai proses di server. Respons API tidak valid.');
         }
 
         const { jobId, statusUrl } = uploadResponse.data.result;
-        console.log(`[UPSCALE] Job berhasil dibuat. ID: ${jobId}`);
+        console.log(`[CHANGEHAIR] Job berhasil dibuat. ID: ${jobId}`);
 
-        // 3. Polling status
+        // 3. Polling status (alur yang sudah familiar)
         let finalImageUrl = null;
         const maxRetries = 25;
         const retryDelay = 3000;
 
         await sock.sendMessage(sender, {
             edit: initialMsg.key,
-            text: `✅ Oke, gambar sedang diperbesar ${scale}x lipat! (Job ID: ${jobId.slice(0, 15)})`
+            text: `✅ Oke, Aira mulai potong rambut sesuai model "${prompt.substring(0, 20)}..."! (Job ID: ${jobId.slice(0, 15)})`
         });
 
         for (let i = 0; i < maxRetries; i++) {
@@ -83,29 +88,32 @@ export default async function execute(sock, msg, args, text, sender) {
 
             if (resultData.status === 'completed') {
                 finalImageUrl = resultData.result?.imageUrl;
+                console.log(`[CHANGEHAIR] Job ${jobId} selesai. URL Gambar: ${finalImageUrl}`);
                 break;
-            } else if (resultData.status !== 'processing') {
-                 throw new Error(`Proses gagal di server dengan status: '${resultData.status}'.`);
+            } else if (resultData.status === 'processing') {
+                console.log(`[CHANGEHAIR] Job ${jobId} masih diproses... (${resultData.step})`);
+            } else {
+                throw new Error(`Proses gagal di server dengan status: '${resultData.status}'. Pesan: ${resultData.step || 'Tidak ada info'}`);
             }
         }
 
         // 4. Kirim hasil
         if (!finalImageUrl) {
-            throw new Error('Gagal mendapatkan hasil (timeout). Server mungkin sedang sibuk.');
+            throw new Error('Gagal mendapatkan hasil gambar setelah beberapa kali mencoba (timeout). Server mungkin sedang sibuk.');
         }
 
         await sock.sendMessage(sender, {
             image: { url: finalImageUrl },
-            caption: `Ini dia hasil upscale ${scale}x nya, jadi gede dan jernih!`
+            caption: `Ini dia gaya rambut barunya! Gimana, cocok kan? ✨`
         }, { quoted: msg });
 
         await sock.sendMessage(sender, { delete: initialMsg.key });
 
     } catch (error) {
-        console.error('[ERROR UPSCALE]', error);
+        console.error('[ERROR CHANGEHAIR]', error);
         await sock.sendMessage(sender, {
             edit: initialMsg.key,
-            text: `Waduh, gagal memperbesar gambar! 😭 Gini katanya:\n\n*${error.message}*`
+            text: `Gagal ganti rambut! 😭 Penyebabnya:\n\n*${error.message}*`
         });
     }
 }

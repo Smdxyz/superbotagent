@@ -1,9 +1,8 @@
-// /core/moduleRunner.js - Pemuat dan Eksekutor Modul Perintah Individual (Dengan Injeksi WaitState)
+// /core/moduleRunner.js (VERSI FINAL YANG LEBIH BERSIH)
 
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { setWaitState } from './waitStateHandler.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -27,10 +26,10 @@ export async function loadCommands() {
             for (const file of commandFiles) {
                 const filePath = path.join(categoryPath, file);
                 const commandName = path.basename(file, '.js');
-                
+
                 try {
                     const commandModule = await import(`file://${filePath}?t=${Date.now()}`);
-                    
+
                     if (commandModule.default && typeof commandModule.default === 'function') {
                         const commandData = {
                             execute: commandModule.default,
@@ -39,7 +38,7 @@ export async function loadCommands() {
                             aliases: commandModule.aliases || [],
                             energyCost: commandModule.energyCost || 0,
                         };
-                        
+
                         commandMap.set(commandName, commandData);
                         commandData.aliases.forEach(alias => commandMap.set(alias, commandData));
                     }
@@ -51,7 +50,7 @@ export async function loadCommands() {
     } catch (error) {
         console.error("❌ Error besar saat memindai folder modul:", error);
     }
-    
+
     console.log(`[MODULE RUNNER] ✅ Pemuatan selesai. Total ${commandMap.size} perintah & alias dimuat.`);
 }
 
@@ -65,12 +64,10 @@ export async function executeCommand(commandName, sock, msg, args, text, sender,
 
     try {
         console.log(`[MODULE RUNNER] Mengeksekusi perintah '${commandName}' untuk ${sender}...`);
-        
-        // [INJEKSI] Suntikkan fungsi setWaitState ke dalam objek extras
-        // agar bisa diakses oleh semua modul.
-        extras.setWaitState = setWaitState;
 
+        // Langsung mengeksekusi perintah dengan objek 'extras' yang sudah lengkap dari handler.js
         await command.execute(sock, msg, args, text, sender, extras);
+
     } catch (error) {
         console.error(`[MODULE RUNNER] Error saat menjalankan '${commandName}':`, error);
         await sock.sendMessage(sender, { text: `Waduh, ada yang rusak pas Aira coba jalanin perintah itu... Maaf ya, Tuan. 😭` });

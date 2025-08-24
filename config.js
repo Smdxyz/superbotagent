@@ -2,11 +2,12 @@
 
 // --- PENGATURAN BOT DASAR ---
 export const BOT_NAME = 'SzyrineBotsID';
-export const BOT_OWNER = ['6281933038407']; // GANTI DENGAN NOMOR WA OWNER ASLI KAMU
-export const BOT_PHONE_NUMBER = '6283125905220'; // GANTI DENGAN NOMOR WA BOT KAMU (Format Internasional Tanpa +)
+export const BOT_OWNER = ['6283125905220']; // GANTI DENGAN NOMOR WA OWNER ASLI KAMU
+export const BOT_PHONE_NUMBER = '6281933038407'; // GANTI DENGAN NOMOR WA BOT KAMU (Format Internasional Tanpa +)
 export const BOT_PREFIX = '.';
 export const SESSION_NAME = 'session_szyrine';
 export const ANTI_CALL = true;
+// --- PERUBAHAN DI SINI ---
 export const BOT_MODE = 'private'; // 'public', 'private', 'self'
 
 // --- KODE PAIRING ---
@@ -29,7 +30,7 @@ export const WAIT_MESSAGE = '⏳ Sebentar ya, lagi ngambil data...';
 export const TOXIC_STRIKE_LIMIT_MUTE = 5;
 export const TOXIC_STRIKE_LIMIT_BLOCK = 9;
 export const MUTE_DURATION_SECONDS = 3600; // 1 jam
-export const ADMIN_CONTACT_FOR_UNBAN = '6281234567890'; // GANTI DENGAN NOMOR ADMIN/OWNER ASLI
+export const ADMIN_CONTACT_FOR_UNBAN = '6283125905220'; // GANTI DENGAN NOMOR ADMIN/OWNER ASLI
 export const OWNER_USERNAMES_FOR_UNBAN = ['Szyrine']; // GANTI DENGAN NAMA OWNER/ADMIN
 
 // --- PENGATURAN WEEKLY ANALYZER ---
@@ -73,3 +74,4 @@ export const ENERGY_RECHARGE_RATE_PER_HOUR = 10;
 // Format: https://raw.githubusercontent.com/<USERNAME>/<REPO_NAME>/<BRANCH>/
 export const COMMAND_UPDATE_BASE_URL = 'https://raw.githubusercontent.com/Smdzyz/Szyrinebot/refs/heads/main/';
 // --- END OF FILE config.js ---
+// kesalahan gw adalah bikin bot WhatsApp gw publik🗿 // -> (Sekarang sudah tidak lagi!)
