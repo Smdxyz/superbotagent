@@ -1,4 +1,4 @@
-// /modules/downloaders/pinterest.js (FINAL & FIXED VERSION)
+// /modules/downloaders/pinterest.js (FINAL & FIXED VERSION 2)
 
 import { BOT_PREFIX } from '../../config.js';
 import { safeApiGet } from '../../libs/apiHelper.js';
@@ -33,7 +33,6 @@ async function fetchPinterestData(query, apiMode, limit) {
             if (!responseV1 || !Array.isArray(responseV1)) {
                 throw new Error("API Pencarian Cepat (v1) tidak memberikan hasil yang valid.");
             }
-            // Normalisasi data: API v1 hanya mengembalikan array URL.
             return responseV1.map(url => ({ imageUrl: url, title: query, sourceUrl: url }));
 
         case 'v2_detail':
@@ -43,7 +42,6 @@ async function fetchPinterestData(query, apiMode, limit) {
             if (!pinsV2 || !Array.isArray(pinsV2)) {
                 throw new Error("API Pencarian Detail (v2) tidak memberikan hasil yang valid.");
             }
-            // Normalisasi data dari struktur v2.
             return pinsV2.map(pin => ({
                 imageUrl: pin.media?.images?.orig?.url,
                 title: pin.title || pin.description || query,
@@ -56,7 +54,6 @@ async function fetchPinterestData(query, apiMode, limit) {
             if (!responseV3 || !Array.isArray(responseV3)) {
                 throw new Error("API Pencarian Terbaik (v3) tidak memberikan hasil yang valid.");
             }
-            // Normalisasi data dari struktur v3.
             return responseV3.map(pin => ({
                 imageUrl: pin.imageLink,
                 title: pin.title || query,
@@ -77,12 +74,10 @@ async function fetchPinterestData(query, apiMode, limit) {
  */
 async function sendAsAlbum(sock, msg, pins, query) {
     const albumItems = [];
-    // Batasi jumlah item album sesuai konstanta.
     for (const pin of pins.slice(0, MAX_ALBUM_ITEMS)) {
         try {
             const buffer = await getImageBuffer(pin.imageUrl);
             if (buffer) {
-                // Hanya item pertama yang diberi caption utama.
                 const caption = albumItems.length === 0 ? `🖼️ Ini dia album untuk: *"${query}"*` : '';
                 albumItems.push({ image: buffer, caption });
             }
@@ -106,26 +101,41 @@ async function sendAsAlbum(sock, msg, pins, query) {
  */
 async function sendAsCarousel(sock, msg, pins, query) {
     const carouselCards = [];
-    // Batasi jumlah kartu carousel sesuai konstanta.
     for (const pin of pins.slice(0, MAX_CAROUSEL_CARDS)) {
-        if (!pin.imageUrl || !pin.sourceUrl) continue; // Lewati pin dengan data tidak lengkap.
-        
-        // Membuat objek parameter tombol dengan cara yang lebih aman.
-        const buttonParams = {
-            display_text: "Lihat di Pinterest",
-            url: pin.sourceUrl
-        };
+        if (!pin.imageUrl || !pin.sourceUrl) continue;
 
-        carouselCards.push({
-            header: { hasMediaAttachment: true, imageMessage: { url: pin.imageUrl } },
-            body: { text: `*${pin.title}*` },
-            nativeFlowMessage: {
-                buttons: [{
-                    name: "cta_url",
-                    buttonParamsJson: JSON.stringify(buttonParams)
-                }]
+        try {
+            // --- BAGIAN YANG DIPERBAIKI ---
+            // Unduh gambar ke buffer terlebih dahulu untuk stabilitas
+            const buffer = await getImageBuffer(pin.imageUrl);
+            if (!buffer) {
+                console.warn(`[PINTEREST_CAROUSEL] Gagal unduh buffer untuk: ${pin.imageUrl}`);
+                continue; // Lanjut ke gambar berikutnya jika gagal
             }
-        });
+
+            // Gunakan buffer untuk membuat media message. Ini jauh lebih andal.
+            const mediaMessage = await sock.generateWAMessageContent({ image: buffer }, {});
+            // --- AKHIR PERBAIKAN ---
+
+            const buttonParams = {
+                display_text: "Lihat di Pinterest",
+                url: pin.sourceUrl
+            };
+
+            carouselCards.push({
+                // Gunakan mediaMessage yang sudah di-generate
+                header: { hasMediaAttachment: true, ...mediaMessage },
+                body: { text: `*${pin.title}*` },
+                nativeFlowMessage: {
+                    buttons: [{
+                        name: "cta_url",
+                        buttonParamsJson: JSON.stringify(buttonParams)
+                    }]
+                }
+            });
+        } catch (e) {
+            console.warn(`[PINTEREST_CAROUSEL] Gagal memproses kartu untuk: ${pin.imageUrl}`, e);
+        }
     }
 
     if (carouselCards.length === 0) {
@@ -144,6 +154,7 @@ async function sendAsCarousel(sock, msg, pins, query) {
     await sock.sendMessage(msg.key.remoteJid, interactiveMessage, { quoted: msg });
 }
 
+
 /**
  * Menangani logika setelah pengguna memilih mode dari daftar.
  * @param {object} sock - Instance Baileys socket.
@@ -155,13 +166,11 @@ async function handleSearchSelection(sock, msg, selectedId, context) {
     const { query, statusMsgKey } = context;
     const sender = msg.key.remoteJid;
 
-    // --- LOGIKA PARSING YANG SUDAH DIPERBAIKI ---
     const parts = selectedId.split('_');
-    const limitStr = parts.pop();      // Mengambil elemen terakhir, misal: '10'
-    const displayMode = parts.pop(); // Mengambil elemen kedua dari akhir, misal: 'carousel'
-    const apiMode = parts.join('_');     // Menggabungkan sisa elemen menjadi mode API, misal: 'v3_best'
+    const limitStr = parts.pop();
+    const displayMode = parts.pop();
+    const apiMode = parts.join('_');
     const limit = parseInt(limitStr, 10);
-    // --- AKHIR PERBAIKAN ---
 
     try {
         await sock.sendMessage(sender, { text: `🔎 Oke, mode dipilih! Mencari *${limit}* gambar untuk *"${query}"*...`, edit: statusMsgKey });
@@ -176,11 +185,10 @@ async function handleSearchSelection(sock, msg, selectedId, context) {
 
         if (displayMode === 'album') {
             await sendAsAlbum(sock, msg, pins, query);
-        } else { // 'carousel'
+        } else {
             await sendAsCarousel(sock, msg, pins, query);
         }
 
-        // Hapus pesan status setelah berhasil.
         await sock.sendMessage(sender, { delete: statusMsgKey });
     } catch (error) {
         console.error("[PINTEREST_HANDLER_ERROR]", error);
@@ -217,11 +225,10 @@ export default async function execute(sock, msg, args, text, sender, extras) {
 
         await sock.sendMessage(sender, listMessage, { quoted: msg });
 
-        // Menyimpan state untuk menangani balasan dari list message.
         await extras.set(sender, 'pinterest', {
             handler: handleSearchSelection,
             context: { query, statusMsgKey: statusMsg.key },
-            timeout: 120000 // 2 menit
+            timeout: 120000 
         });
 
     } catch (error) {
