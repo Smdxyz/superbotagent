@@ -1,4 +1,4 @@
-// /modules/downloaders/pinterest.js
+// /modules/downloaders/pinterest.js (FINAL & FIXED VERSION)
 
 import { BOT_PREFIX } from '../../config.js';
 import { safeApiGet } from '../../libs/apiHelper.js';
@@ -155,8 +155,13 @@ async function handleSearchSelection(sock, msg, selectedId, context) {
     const { query, statusMsgKey } = context;
     const sender = msg.key.remoteJid;
 
-    const [apiMode, displayMode, limitStr] = selectedId.split('_');
+    // --- LOGIKA PARSING YANG SUDAH DIPERBAIKI ---
+    const parts = selectedId.split('_');
+    const limitStr = parts.pop();      // Mengambil elemen terakhir, misal: '10'
+    const displayMode = parts.pop(); // Mengambil elemen kedua dari akhir, misal: 'carousel'
+    const apiMode = parts.join('_');     // Menggabungkan sisa elemen menjadi mode API, misal: 'v3_best'
     const limit = parseInt(limitStr, 10);
+    // --- AKHIR PERBAIKAN ---
 
     try {
         await sock.sendMessage(sender, { text: `🔎 Oke, mode dipilih! Mencari *${limit}* gambar untuk *"${query}"*...`, edit: statusMsgKey });
