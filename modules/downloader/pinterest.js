@@ -1,6 +1,6 @@
-// /modules/downloaders/pinterest.js (FINAL & FIXED VERSION 3)
+// /modules/downloaders/pinterest.js (FINAL & FIXED VERSION 4)
 
-import { generateWAMessageContent } from '@fizzxydev/baileys-pro'; // <-- PERBAIKAN 1: Impor fungsi
+import { generateWAMessageContent } from '@fizzxydev/baileys-pro';
 import { BOT_PREFIX } from '../../config.js';
 import { safeApiGet } from '../../libs/apiHelper.js';
 import { getImageBuffer } from '../../libs/utils.js';
@@ -100,8 +100,12 @@ async function sendAsCarousel(sock, msg, pins, query) {
                 continue;
             }
 
-            // --- PERBAIKAN 2: Panggil fungsi langsung, bukan dari 'sock' ---
-            const mediaMessage = await generateWAMessageContent({ image: buffer }, {});
+            // --- PERBAIKAN FINAL: Berikan fungsi upload dari sock ke dalam options ---
+            const mediaMessage = await generateWAMessageContent(
+                { image: buffer },
+                { upload: sock.waUploadToServer } // Ini adalah bagian kuncinya
+            );
+            // --- AKHIR PERBAIKAN ---
 
             const buttonParams = {
                 display_text: "Lihat di Pinterest",
