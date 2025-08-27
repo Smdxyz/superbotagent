@@ -1,4 +1,4 @@
-// /modules/downloaders/pinterest.js (FIXED ID PARSING LOGIC)
+// /modules/downloaders/pinterest.js (FINAL VERSION - DUPLICATES REMOVED)
 
 import { BOT_PREFIX } from '../../config.js';
 import { safeApiGet } from '../../libs/apiHelper.js';
@@ -10,7 +10,6 @@ export const usage = `${BOT_PREFIX}pinterest <query>`;
 export const aliases = ['pin'];
 export const energyCost = 4;
 
-// Fungsi ini tidak berubah, sudah benar.
 async function fetchPinterestData(query, apiMode, limit) {
     let apiUrl;
     switch (apiMode) {
@@ -46,56 +45,9 @@ async function fetchPinterestData(query, apiMode, limit) {
     }
 }
 
-// Fungsi lain tidak berubah
-async function sendAsAlbum(sock, msg, pins, query) { /* ... (kode sama) ... */ }
-async function sendAsCarousel(sock, msg, pins, query) { /* ... (kode sama) ... */ }
-
-
-// --- FUNGSI INILAH YANG DIPERBAIKI ---
-async function handleSearchSelection(sock, msg, selectedId, context) {
-    const { query, statusMsgKey } = context;
-    const sender = msg.key.remoteJid;
-
-    // --- PERBAIKAN UTAMA ADA DI SINI ---
-    const parts = selectedId.split('_');
-    const limit = parseInt(parts.pop(), 10); // Ambil bagian terakhir sebagai 'limit'
-    const displayMode = parts.pop(); // Ambil bagian kedua dari belakang sebagai 'displayMode'
-    const apiMode = parts.join('_'); // Gabungkan sisa bagian depan sebagai 'apiMode'
-    // Contoh: "v3_best_carousel_10" -> apiMode="v3_best", displayMode="carousel", limit=10
-    // --- AKHIR DARI PERBAIKAN ---
-
-    try {
-        await sock.sendMessage(sender, { text: `🔎 Oke, mode dipilih! Mencari *${limit}* gambar untuk *"${query}"*...`, edit: statusMsgKey });
-        
-        // Sekarang, variabel 'apiMode' akan berisi nilai yang benar ('v3_best', 'v1_fast', dll.)
-        const pins = (await fetchPinterestData(query, apiMode, limit)).filter(p => p.imageUrl);
-
-        if (pins.length === 0) throw new Error("Tidak ada gambar yang ditemukan.");
-
-        await sock.sendMessage(sender, { text: `✅ Nemu *${pins.length}* gambar! Menyiapkan tampilan *${displayMode}*...`, edit: statusMsgKey });
-        
-        if (displayMode === 'album') {
-            await sendAsAlbum(sock, msg, pins, query);
-        } else { // carousel
-            await sendAsCarousel(sock, msg, pins, query);
-        }
-
-        await sock.sendMessage(sender, { delete: statusMsgKey });
-    } catch (error) {
-        console.error("[PINTEREST_HANDLER_ERROR]", error);
-        await sock.sendMessage(sender, { text: `❌ Aduh, gagal pas nyari: ${error.message}`, edit: statusMsgKey });
-    }
-}
-
-// Fungsi execute tidak berubah
-export default async function execute(sock, msg, args, text, sender, extras) { /* ... (kode sama) ... */ }
-
-
-// --- KODE LENGKAP FUNGSI YANG TIDAK DIUBAH (UNTUK KEMUDAHAN COPY-PASTE) ---
-
 async function sendAsAlbum(sock, msg, pins, query) {
     const albumItems = [];
-    for (const pin of pins.slice(0, 10)) { // Batas album 10
+    for (const pin of pins.slice(0, 10)) {
         try {
             const buffer = await getImageBuffer(pin.imageUrl);
             if (buffer) {
@@ -112,7 +64,7 @@ async function sendAsAlbum(sock, msg, pins, query) {
 
 async function sendAsCarousel(sock, msg, pins, query) {
     const carouselCards = [];
-    for (const pin of pins.slice(0, 10)) { // Batas carousel 10
+    for (const pin of pins.slice(0, 10)) {
         if (!pin.imageUrl || !pin.sourceUrl) continue;
         carouselCards.push({
             header: { hasMediaAttachment: true, imageMessage: { url: pin.imageUrl } },
@@ -134,6 +86,37 @@ async function sendAsCarousel(sock, msg, pins, query) {
             carousel: { cards: carouselCards }
         }
     }, { quoted: msg });
+}
+
+async function handleSearchSelection(sock, msg, selectedId, context) {
+    const { query, statusMsgKey } = context;
+    const sender = msg.key.remoteJid;
+
+    const parts = selectedId.split('_');
+    const limit = parseInt(parts.pop(), 10);
+    const displayMode = parts.pop();
+    const apiMode = parts.join('_');
+
+    try {
+        await sock.sendMessage(sender, { text: `🔎 Oke, mode dipilih! Mencari *${limit}* gambar untuk *"${query}"*...`, edit: statusMsgKey });
+        
+        const pins = (await fetchPinterestData(query, apiMode, limit)).filter(p => p.imageUrl);
+
+        if (pins.length === 0) throw new Error("Tidak ada gambar yang ditemukan.");
+
+        await sock.sendMessage(sender, { text: `✅ Nemu *${pins.length}* gambar! Menyiapkan tampilan *${displayMode}*...`, edit: statusMsgKey });
+        
+        if (displayMode === 'album') {
+            await sendAsAlbum(sock, msg, pins, query);
+        } else {
+            await sendAsCarousel(sock, msg, pins, query);
+        }
+
+        await sock.sendMessage(sender, { delete: statusMsgKey });
+    } catch (error) {
+        console.error("[PINTEREST_HANDLER_ERROR]", error);
+        await sock.sendMessage(sender, { text: `❌ Aduh, gagal pas nyari: ${error.message}`, edit: statusMsgKey });
+    }
 }
 
 export default async function execute(sock, msg, args, text, sender, extras) {
