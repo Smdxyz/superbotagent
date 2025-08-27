@@ -1,5 +1,6 @@
-// /modules/downloaders/pinterest.js (FINAL & FIXED VERSION 2)
+// /modules/downloaders/pinterest.js (FINAL & FIXED VERSION 3)
 
+import { generateWAMessageContent } from '@fizzxydev/baileys-pro'; // <-- PERBAIKAN 1: Impor fungsi
 import { BOT_PREFIX } from '../../config.js';
 import { safeApiGet } from '../../libs/apiHelper.js';
 import { getImageBuffer } from '../../libs/utils.js';
@@ -17,10 +18,6 @@ const MAX_CAROUSEL_CARDS = 10;
 
 /**
  * Mengambil data dari berbagai endpoint API Pinterest.
- * @param {string} query - Kata kunci pencarian.
- * @param {'v1_fast'|'v2_detail'|'v3_best'} apiMode - Versi API yang akan digunakan.
- * @param {number} limit - Jumlah maksimum hasil yang diminta.
- * @returns {Promise<Array<{imageUrl: string, title: string, sourceUrl: string}>>} - Array objek pin yang dinormalisasi.
  */
 async function fetchPinterestData(query, apiMode, limit) {
     let apiUrl;
@@ -67,10 +64,6 @@ async function fetchPinterestData(query, apiMode, limit) {
 
 /**
  * Mengirimkan hasil pencarian sebagai album/galeri.
- * @param {object} sock - Instance Baileys socket.
- * @param {object} msg - Objek pesan asli.
- * @param {Array<object>} pins - Array data pin.
- * @param {string} query - Kata kunci pencarian asli.
  */
 async function sendAsAlbum(sock, msg, pins, query) {
     const albumItems = [];
@@ -94,10 +87,6 @@ async function sendAsAlbum(sock, msg, pins, query) {
 
 /**
  * Mengirimkan hasil pencarian sebagai pesan carousel interaktif.
- * @param {object} sock - Instance Baileys socket.
- * @param {object} msg - Objek pesan asli.
- * @param {Array<object>} pins - Array data pin.
- * @param {string} query - Kata kunci pencarian asli.
  */
 async function sendAsCarousel(sock, msg, pins, query) {
     const carouselCards = [];
@@ -105,17 +94,14 @@ async function sendAsCarousel(sock, msg, pins, query) {
         if (!pin.imageUrl || !pin.sourceUrl) continue;
 
         try {
-            // --- BAGIAN YANG DIPERBAIKI ---
-            // Unduh gambar ke buffer terlebih dahulu untuk stabilitas
             const buffer = await getImageBuffer(pin.imageUrl);
             if (!buffer) {
                 console.warn(`[PINTEREST_CAROUSEL] Gagal unduh buffer untuk: ${pin.imageUrl}`);
-                continue; // Lanjut ke gambar berikutnya jika gagal
+                continue;
             }
 
-            // Gunakan buffer untuk membuat media message. Ini jauh lebih andal.
-            const mediaMessage = await sock.generateWAMessageContent({ image: buffer }, {});
-            // --- AKHIR PERBAIKAN ---
+            // --- PERBAIKAN 2: Panggil fungsi langsung, bukan dari 'sock' ---
+            const mediaMessage = await generateWAMessageContent({ image: buffer }, {});
 
             const buttonParams = {
                 display_text: "Lihat di Pinterest",
@@ -123,7 +109,6 @@ async function sendAsCarousel(sock, msg, pins, query) {
             };
 
             carouselCards.push({
-                // Gunakan mediaMessage yang sudah di-generate
                 header: { hasMediaAttachment: true, ...mediaMessage },
                 body: { text: `*${pin.title}*` },
                 nativeFlowMessage: {
@@ -154,13 +139,8 @@ async function sendAsCarousel(sock, msg, pins, query) {
     await sock.sendMessage(msg.key.remoteJid, interactiveMessage, { quoted: msg });
 }
 
-
 /**
  * Menangani logika setelah pengguna memilih mode dari daftar.
- * @param {object} sock - Instance Baileys socket.
- * @param {object} msg - Objek pesan (dari interaksi).
- * @param {string} selectedId - ID baris yang dipilih pengguna.
- * @param {object} context - Data konteks dari perintah awal.
  */
 async function handleSearchSelection(sock, msg, selectedId, context) {
     const { query, statusMsgKey } = context;
