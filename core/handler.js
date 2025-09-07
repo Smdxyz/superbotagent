@@ -1,15 +1,35 @@
-// /core/handler.js (REVISED TO USE GPT-4 AND REMOVE VISION)
+// /core/handler.js (REVISED TO USE GPT-4 AND REMOVE VISION, ADDED SPAM BLOCKER & AI FEATURE AWARENESS)
 
+import fs from 'fs';
 import { BOT_PREFIX, BOT_MODE, BOT_OWNER } from '../config.js';
 import { getOrCreateUserBasicData } from './firebase.js';
 import { getUserLocalData, updateAffection, deductUserEnergy } from './localDataHandler.js';
-// --- PERUBAHAN: Import otak AI yang baru ---
 import { callGpt4ForChat } from './aira_gpt4_brain.js'; 
 import { executeCommand, getAllCommands } from './moduleRunner.js';
 import { getWaitState, clearWaitState, setWaitState } from './waitStateHandler.js';
 
 const conversationHistory = new Map();
 const MAX_HISTORY_LENGTH = 12;
+
+// --- TAMBAHAN: Muat kata kunci spam judol ---
+let spamJudolKeywords = [];
+try {
+    const rawData = fs.readFileSync('./spamJudolKeywords.json', 'utf-8');
+    spamJudolKeywords = JSON.parse(rawData);
+    console.log(`[SPAM_BLOCKER] Berhasil memuat ${spamJudolKeywords.length} kata kunci spam judol.`);
+} catch (error) {
+    console.error("[SPAM_BLOCKER] Gagal memuat spamJudolKeywords.json:", error);
+}
+
+function isJudiSpam(text) {
+    if (!text || spamJudolKeywords.length === 0) return false;
+    const lowerCaseText = text.toLowerCase();
+    // Jika pesan mengandung setidaknya 2 kata kunci, anggap spam untuk mengurangi false positive
+    const matchCount = spamJudolKeywords.filter(keyword => lowerCaseText.includes(keyword)).length;
+    return matchCount >= 2;
+}
+// --- AKHIR TAMBAHAN ---
+
 
 export async function handler(sock, m) {
     if (!m || !m.messages || m.messages.length === 0) return;
@@ -27,6 +47,19 @@ export async function handler(sock, m) {
                  || m.messages[0].message?.buttonsResponseMessage?.selectedButtonId
                  || m.messages[0].message?.listResponseMessage?.singleSelectReply?.selectedRowId
                  || '';
+
+    // --- TAMBAHAN: Prioritas #0 - Blokir Pesan Judi Online ---
+    if (isJudiSpam(body)) {
+        try {
+            console.log(`[SPAM_BLOCKER] Pesan spam judol terdeteksi dari ${sender}. Memblokir...`);
+            await sock.updateBlockStatus(sender, 'block');
+            // Kita tidak mengirim pesan balasan agar tidak berinteraksi dengan spammer
+        } catch (error) {
+            console.error(`[SPAM_BLOCKER] Gagal memblokir ${sender}:`, error);
+        }
+        return; // Hentikan proses di sini
+    }
+    // --- AKHIR TAMBAHAN ---
 
     const { internalId } = await getOrCreateUserBasicData(sender, pushName);
     const userData = getUserLocalData(internalId, sender);
@@ -82,11 +115,15 @@ export async function handler(sock, m) {
         await sock.sendPresenceUpdate('composing', sender);
         const userHistory = conversationHistory.get(sender) || [];
 
-        // --- PENGHAPUSAN: Logika analisis gambar dihapus ---
         userHistory.push({ role: 'user', parts: [{ text: body }] });
 
-        // --- PERUBAHAN: Memanggil otak GPT-4 ---
-        const decision = await callGpt4ForChat(userHistory, pushName, sender);
+        // --- PERUBAHAN: Mengambil daftar perintah untuk diberikan ke AI ---
+        const allCommands = getAllCommands();
+        const uniqueCommands = [...new Set([...allCommands.keys()])].filter(cmd => !allCommands.get(cmd).aliases.includes(cmd));
+        const commandListForAI = uniqueCommands.map(cmd => `${BOT_PREFIX}${cmd}`);
+
+        // --- PERUBAHAN: Memanggil otak GPT-4 dengan data perintah ---
+        const decision = await callGpt4ForChat(userHistory, pushName, sender, commandListForAI);
 
         if (!decision || !decision.action) throw new Error("Respons AI tidak valid.");
         

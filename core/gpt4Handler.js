@@ -1,12 +1,12 @@
-// /core/gpt4Handler.js (NEW AI ENGINE)
+// /core/gpt4Handler.js (NEW AI ENGINE WITH FEATURE AWARENESS)
 
-import axios from 'axios'; // Ganti dengan proxiedAxios jika Anda punya helper itu
+import axios from 'axios';
 
 const gpt4Endpoint = 'https://chateverywhere.app/api/chat';
 const conversationSessions = new Map();
 
-// --- PERUBAHAN: Menambahkan userName ke signature ---
-export async function handleGpt4Response(sessionId, userName, message) {
+// --- PERUBAHAN: Menambahkan userName dan commandList ke signature ---
+export async function handleGpt4Response(sessionId, userName, message, commandList = []) {
     if (!conversationSessions.has(sessionId)) {
         conversationSessions.set(sessionId, { history: [] });
     }
@@ -20,18 +20,24 @@ export async function handleGpt4Response(sessionId, userName, message) {
         fileList: []
     });
 
-    // Batasi riwayat untuk menjaga token
     if (history.length > 12) {
         session.history = history.slice(-12);
     }
 
     try {
-        // --- PERUBAHAN: System prompt Aira yang detail disuntikkan di sini ---
+        // --- PERUBAHAN: Menyuntikkan daftar perintah ke dalam system prompt ---
+        let commandInfo = "Kamu juga bisa melakukan beberapa perintah khusus kalau Tuan memintanya dengan awalan titik (.), tapi kamu belum tahu perintah apa saja yang ada.";
+        if (commandList.length > 0) {
+            commandInfo = `Jika Tuan bertanya apa saja yang bisa kamu lakukan, kamu bisa menjelaskan beberapa perintah ini: ${commandList.join(', ')}. Ini adalah perintah-perintah yang bisa kamu jalankan. Jelaskan dengan gaya bicaramu yang ceria ya!`;
+        }
+        
         const systemPrompt = `
             Kamu adalah Aira, asisten AI cewek dengan perasaan. Gaya bicaramu ceria, ramah, sopan, dan manja. Selalu gunakan emoji.
             Nama user yang sedang berbicara denganmu adalah "${userName}". Hubunganmu dengannya adalah "Teman Dekat".
             Kamu diciptakan dan dikelola oleh trio pemuda visioner. CEO & Founder utamamu adalah Susanto. Kontrak eksklusif dan pengembanganmu dipegang oleh Sann (@sann_inmymind) dan Szyn.
             
+            ${commandInfo}
+
             ATURAN PENTING:
             - Selalu gunakan bahasa Indonesia yang natural, ceria, dan manja. Jangan kaku seperti robot.
             - Selalu gunakan emoji yang sesuai dengan emosimu (contoh: 💖, 😠, 😥, ✨, 🤔).
@@ -52,7 +58,6 @@ export async function handleGpt4Response(sessionId, userName, message) {
             'Referer': 'https://chateverywhere.app/',
         };
 
-        // Ganti dengan proxiedAxios jika perlu
         const response = await axios.post(gpt4Endpoint, payload, { headers, timeout: 60000 });
         
         const aiResponse = response?.data?.trim();
@@ -66,7 +71,6 @@ export async function handleGpt4Response(sessionId, userName, message) {
         }
     } catch (error) {
         console.error("[GPT4_HANDLER_ERROR]", error.response ? error.response.data : error.message);
-        // Hapus pesan terakhir yang gagal dari riwayat agar tidak diulang
         history.pop();
         throw new Error('Aduh, koneksi ke pusat data Aira lagi putus-nyambung. Maaf ya, Tuan...');
     }
